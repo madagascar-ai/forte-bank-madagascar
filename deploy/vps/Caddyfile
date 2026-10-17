@@ -10,6 +10,10 @@ madagascar-ai.team, www.madagascar-ai.team {
 		# answering the jury with 502. Requests whose connection never opened are safe to retry.
 		lb_try_duration 30s
 		lb_try_interval 250ms
+		# Status polls are idempotent: retry them even if the old process dropped the connection.
+		lb_retry_match {
+			method GET HEAD
+		}
 		transport http {
 			read_timeout 10m
 			write_timeout 10m
