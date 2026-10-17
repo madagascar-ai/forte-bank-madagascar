@@ -205,3 +205,41 @@ def test_personal_item_left_at_workstation_without_a_handoff_is_still_flagged():
     objects, profile = _scene(frames)
     journal = build_journal(objects, profile, 5, 5)
     assert any(state.value is True for state in _workstation_states(journal, "personal_item"))
+
+
+CASHIER = ("cashier", "person", SEATED)
+STACK_AT_CASHIER = ("stack", "money", [0.28, 0.45, 0.33, 0.5])
+STACK_AT_CLIENT = ("stack", "money", [0.66, 0.45, 0.71, 0.5])
+
+
+def _transfers(journal):
+    return [event for event in journal.actions if event.type == "cash_transferred"]
+
+
+def test_stack_last_seen_on_the_client_side_is_a_handover(settings):
+    # Seen once in the client's hand, then hidden by it: the smoothed side never flips.
+    frames = [[CASHIER, CLIENT, STACK_AT_CASHIER] for _ in range(10)] + [[CASHIER, CLIENT, STACK_AT_CLIENT]]
+    frames += [[CASHIER, CLIENT] for _ in range(10)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    transfers = _transfers(journal)
+    assert len(transfers) == 1 and transfers[0].end_sec == 2.0
+    assert transfers[0].attributes["to_role"] == "client"
+    assert transfers[0].attributes["inferred_from"] == "track_end"
+    rules, scenarios = load_catalog(settings.config_dir)
+    found = [c for c in rule_candidates(journal, rules, scenarios) if c.rule_id == "payout_without_observed_count"]
+    assert len(found) == 1 and found[0].timecode_sec == 2.0
+
+
+def test_one_frame_flicker_to_the_client_side_is_not_a_handover():
+    frames = [[CASHIER, CLIENT, STACK_AT_CASHIER] for _ in range(10)] + [[CASHIER, CLIENT, STACK_AT_CLIENT]]
+    frames += [[CASHIER, CLIENT, STACK_AT_CASHIER] for _ in range(10)]
+    objects, profile = _scene(frames)
+    assert _transfers(build_journal(objects, profile, 5, 5)) == []
+
+
+def test_stack_reappearing_at_the_client_long_after_is_not_a_handover():
+    frames = [[CASHIER, CLIENT, STACK_AT_CASHIER] for _ in range(5)] + [[CASHIER, CLIENT] for _ in range(25)]
+    frames += [[CASHIER, CLIENT, STACK_AT_CLIENT]]
+    objects, profile = _scene(frames)
+    assert _transfers(build_journal(objects, profile, 7, 5)) == []

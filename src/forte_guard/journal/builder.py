@@ -23,6 +23,8 @@ LABEL_ALIASES = {
 # hand class) near the machine for most of that dwell.
 COUNT_MIN_SEC = 1.0
 COUNT_PRESENCE_RATIO = 0.9
+# A cash track that changes side within this window counts as handed over.
+HANDOFF_WINDOW_SEC = 4.0
 # Objects that should not stay at the cashier's workstation (or only while she is there).
 WORKSTATION_ITEMS = ("personal_item", "phone", "cash_bag", "stamp", "folder")
 WORKSTATION_ZONES = {"cashier_area", "counter_area"}
@@ -255,6 +257,7 @@ def build_journal(
     service_sessions: set[str] = set()
     batches: dict[str, Batch] = {}
     last_known_side = {}
+    last_money: dict[str, tuple] = {}  # last raw observation of each cash track
     locations = {}
     object_states = {}
     emitted_device_contacts = set()
@@ -542,7 +545,12 @@ def build_journal(
             side = "client" if location == "client_area" else ("cashier" if location in {"cashier_area", "counter_area"} else None)
             _, stable_side = smoothers[(item.track_id, "side")].update(side)
             former = last_known_side.get(item.track_id)
-            if stable_side and former and stable_side != former[0] and frame.timestamp_sec - former[1] <= 4:
+            if (
+                stable_side
+                and former
+                and stable_side != former[0]
+                and frame.timestamp_sec - former[1] <= HANDOFF_WINDOW_SEC
+            ):
                 from_role, to_role = former[0], stable_side
                 action = event(
                     "cash_transferred",
@@ -563,6 +571,7 @@ def build_journal(
                     state("service_active", True, frame, source_events=[action.event_id])
             if stable_side:
                 last_known_side[item.track_id] = (stable_side, frame.timestamp_sec, frame.frame_id)
+            last_money[item.track_id] = (side, frame, item, clients)
             if (
                 location == "counter_area"
                 and locations.get(item.track_id) not in {None, "counter_area"}
@@ -588,6 +597,27 @@ def build_journal(
                     confidence=item.confidence,
                 )
             locations[item.track_id] = location
+
+    # A stack handed over the counter is often seen on the client's side for a single sample before the
+    # client's hand hides it, so the smoothed side never flips. The track ending there is the handover.
+    for track_id, (side, frame, item, clients) in last_money.items():
+        former = last_known_side.get(track_id)
+        if side != "client" or not former or former[0] != "cashier":
+            continue
+        if frame.timestamp_sec - former[1] > HANDOFF_WINDOW_SEC:
+            continue
+        action = event(
+            "cash_transferred",
+            frame,
+            [],
+            [track_id],
+            {"from_role": "cashier", "to_role": "client", "inferred_from": "track_end"},
+            confidence=min(item.confidence, 0.6),
+            start=former[1],
+            visibility="uncertain",
+            session=_nearest_session(item.box.center, clients, sessions, active_session),
+        )
+        action.evidence_frame_ids = list(dict.fromkeys([former[2], frame.frame_id]))
 
     journal.batches = list(batches.values())
     journal.actions.sort(key=lambda a: (a.start_sec, a.end_sec, a.event_id))
