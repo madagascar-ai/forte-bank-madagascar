@@ -124,6 +124,7 @@ API жюри (ТЗ §10), менять нельзя:
 | `src/forte_guard/contracts.py` | Pydantic-контракты между этапами | общий — менять только по тикету |
 | `src/forte_guard/video.py` | декодирование, кадры, `Deadline` | `vision` |
 | `src/forte_guard/vision/`, `config/detector.json`, `scripts/prepare_models.py` | детектор и трекер → `ObjectJournal` | `vision` |
+| `config/training_classes.json`, `scripts/{prepare_dataset,prelabel,labeling_packages,merge_labels,train_detector}.py`, `scripts/labeling_kit/` | подготовка кадров, разметка и дообучение детектора (вне рантайма) | `data`, `vision` |
 | `src/forte_guard/journal/`, `config/zones.json` | роли, зоны, состояния, события → `ActionJournal` | `journal` |
 | `src/forte_guard/reasoning/`, `config/rules.json`, `config/scenarios.json` | правила, LLM, слияние, проверка → `Candidate[]` | `reasoning` |
 | `src/forte_guard/pipeline.py` | оркестрация, доказательства, сборка ответа | общий |
@@ -307,6 +308,7 @@ PR: <ссылка> · CI: зелёный
 ## 11. Где что лежит
 
 - Флоу v2: [`docs/pipeline-flow-v2.md`](docs/pipeline-flow-v2.md). Каталог типов нарушений (когда появится): `docs/violations.md`.
+- Дообучение детектора и разметка командой: [`docs/training.md`](docs/training.md).
 - Запуск, API, артефакты: [`README.md`](README.md). Командная работа: [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/team-development.md`](docs/team-development.md). Автодеплой: [`docs/autodeploy.md`](docs/autodeploy.md).
 - ТЗ и FAQ организаторов — у каждого участника локально (в репозиторий не кладём); суть — в разделе 1.
 - Задачи, приоритеты, зависимости — доска Jira KAN. Если тикет противоречит этому файлу, действует этот файл; противоречие отметь комментарием в тикете.

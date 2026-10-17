@@ -1,0 +1,18 @@
+{
+  "classes": [
+    {"name": "person", "prompts": ["person"]},
+    {"name": "cash", "prompts": ["stack of banknotes", "banknote"]},
+    {"name": "id_card", "prompts": ["identity card"]},
+    {"name": "cash_bag", "prompts": ["cash collection bag"]},
+    {"name": "counter", "prompts": ["banknote counting machine"]},
+    {"name": "stamp", "prompts": ["rubber stamp"]},
+    {"name": "folder", "prompts": ["document folder"]},
+    {"name": "safe_key", "prompts": ["key in a lock"]},
+    {"name": "personal_item", "prompts": ["jacket", "handbag", "coffee cup", ""]},
+    {"name": "door", "prompts": ["door"]},
+    {"name": "safe", "prompts": ["metal safe"]},
+    {"name": "laptop", "prompts": ["laptop", "personal computer"]},
+    {"name": "currency_detector", "prompts": ["counterfeit banknote detector"]}
+  ],
+  "notes": "Order defines YOLO class ids; never reorder after labeling starts, only append. Prompts only draft labels for human correction. The detector finds door, safe and laptop in any camera angle; their open/closed and on/off states are judged separately on the detected crop."
+}

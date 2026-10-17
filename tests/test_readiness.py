@@ -41,3 +41,13 @@ def test_invalid_remote_llm_configuration_is_never_probed(monkeypatch, settings)
     report = inspect_readiness(settings)
     assert report["status"] == "not_ready"
     assert report["checks"][0]["name"] == "configuration"
+
+
+def test_open_vocabulary_detectors_require_the_configured_vocabulary(settings):
+    for detector in ("yoloe", "world"):
+        settings.detector = detector
+        report = inspect_readiness(settings)
+        assert next(item for item in report["checks"] if item["name"] == "configuration")["ready"]
+        assert not next(item for item in report["checks"] if item["name"] == "detector_vocabulary")["ready"]
+    settings.detector = "yolo"
+    assert all(item["name"] != "detector_vocabulary" for item in inspect_readiness(settings)["checks"])

@@ -10,7 +10,7 @@ import httpx
 
 from .contracts import ZoneProfile
 from .reasoning.catalog import load_catalog
-from .settings import Settings
+from .settings import OPEN_VOCABULARY, Settings
 
 
 def inspect_readiness(settings: Settings) -> dict:
@@ -41,7 +41,7 @@ def inspect_readiness(settings: Settings) -> dict:
     check(
         "detector_weights", weights_ready, "Веса YOLO доступны" if weights_ready else "Подготовьте веса YOLO"
     )
-    if settings.detector == "world":
+    if settings.detector in OPEN_VOCABULARY:
         try:
             vocabulary = json.loads((settings.model_path.parent / "vocabulary.json").read_text())
             matched = vocabulary == detector["prompts"]

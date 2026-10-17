@@ -11,6 +11,9 @@ def _bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes"}
 
 
+# Detectors whose classes are the text prompts of config/detector.json baked into the weights.
+OPEN_VOCABULARY = {"yoloe", "world"}
+
 # Tailscale/CGNAT range: Python does not mark it private, but it never routes to the internet.
 _TEAM_NETWORK = ip_network("100.64.0.0/10")
 
@@ -91,8 +94,8 @@ class Settings:
             raise ValueError("Set FORTE_API_KEY in .env (see scripts/setup.py)")
         if not 0 < self.sample_fps <= 30:
             raise ValueError("FORTE_SAMPLE_FPS must be in (0, 30]")
-        if self.detector not in {"world", "yolo", "replay"}:
-            raise ValueError("FORTE_DETECTOR must be world, yolo, or replay")
+        if self.detector not in {*OPEN_VOCABULARY, "yolo", "replay"}:
+            raise ValueError("FORTE_DETECTOR must be world, yoloe, yolo, or replay")
         url = urlparse(self.ollama_url)
         if url.scheme != "http" or not is_team_llm_host(url.hostname):
             raise ValueError(

@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = ["ultralytics>=8.3,<9", "lap>=0.5", "openai-clip>=1.0.1", "setuptools>=75,<81"]
-dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1", "openpyxl>=3.1,<4"]
 
 [project.scripts]
 forte-guard = "forte_guard.cli:main"

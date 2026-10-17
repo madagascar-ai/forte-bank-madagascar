@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..contracts import Box, Detection, Frame, ObjectFrame, ObjectJournal
-from ..settings import Settings
+from ..settings import OPEN_VOCABULARY, Settings
 from ..video import Deadline
 
 
@@ -25,14 +25,15 @@ class YoloTracker:
         offline_environment(settings)
         if not settings.model_path.is_file():
             raise FileNotFoundError("Веса детектора не найдены. Выполните python scripts/prepare_models.py")
-        from ultralytics import YOLO, YOLOWorld
+        from ultralytics import YOLO, YOLOE, YOLOWorld
         from ultralytics import settings as yolo_settings
 
         yolo_settings.update({"sync": False})
         import torch
 
         self.settings = settings
-        self.model = (YOLOWorld if settings.detector == "world" else YOLO)(str(settings.model_path.resolve()))
+        loader = {"world": YOLOWorld, "yoloe": YOLOE}.get(settings.detector, YOLO)
+        self.model = loader(str(settings.model_path.resolve()))
         self.device = settings.device
         if self.device == "auto":
             self.device = (
@@ -44,7 +45,7 @@ class YoloTracker:
         self.aliases = config.get("aliases", {})
         self.names = list(self.model.names.values())
         self.prompt_to_class = {text: label for label, text in config.get("prompts", {}).items()}
-        if settings.detector == "world" and set(self.names) != set(self.prompt_to_class):
+        if settings.detector in OPEN_VOCABULARY and set(self.names) != set(self.prompt_to_class):
             raise ValueError("Словарь весов не совпадает с config/detector.json; повторите prepare_models.py")
 
     def run(self, frames: list[Frame], deadline: Deadline, progress: Callable) -> ObjectJournal:

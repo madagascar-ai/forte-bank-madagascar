@@ -20,6 +20,9 @@ videos/
 *.pt
 *.onnx
 *.gguf
+# Text encoders Ultralytics downloads into the working directory during model preparation.
+/mobileclip*.ts
+/.mobileclip*.part
 *.sqlite*
 *.log
 Кейс_ForteBank.docx.md
@@ -28,4 +31,5 @@ videos/
 /tools/run_local_review.py
 /tools/extract_review_frames.swift
 /docs/event_log_architecture.md
+videos
 
