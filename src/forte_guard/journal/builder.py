@@ -5,7 +5,6 @@ from collections import Counter, defaultdict
 from itertools import pairwise
 
 from ..contracts import Action, ActionJournal, Batch, Box, Detection, ObjectJournal, State, ZoneProfile
-from .tracks import repair_tracks
 
 # The detector vocabulary evolves; the journal keeps one internal name per object kind.
 LABEL_ALIASES = {
@@ -212,18 +211,11 @@ def _contact(money: Detection, hands: list[Detection], people: list[Detection]):
 
 
 def build_journal(
-    objects: ObjectJournal,
-    profile: ZoneProfile,
-    duration: float,
-    fps: float,
-    presence: str = "track",
-    track_repair: bool = True,
+    objects: ObjectJournal, profile: ZoneProfile, duration: float, fps: float, presence: str = "track"
 ) -> ActionJournal:
     for frame in objects.frames:
         for item in frame.detections:
             item.label = LABEL_ALIASES.get(item.label, item.label)
-    if track_repair:
-        repair_tracks(objects)
     roles = assign_roles(objects, profile)
     journal = ActionJournal(duration_sec=duration, sample_fps=fps, roles=roles)
     journal.warnings.extend(objects.warnings)

@@ -55,7 +55,8 @@ class Settings:
     auto_zones: bool = field(default_factory=lambda: _bool("FORTE_AUTO_ZONES", True))
     # "track": absence only when a cashier track is seen away; "zone": also when the workstation stays empty.
     cashier_presence: str = field(default_factory=lambda: os.getenv("FORTE_CASHIER_PRESENCE", "zone"))
-    # Join tracks the tracker broke and give each track one label among confusable classes.
+    # Before zones and the journal: one label per track among confusable classes, broken tracks joined,
+    # reflections of people set aside.
     track_repair: bool = field(default_factory=lambda: _bool("FORTE_TRACK_REPAIR", True))
     ollama_url: str = field(default_factory=lambda: os.getenv("FORTE_OLLAMA_URL", "http://127.0.0.1:11434"))
     llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma4:26b"))

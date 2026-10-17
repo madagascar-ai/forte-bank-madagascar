@@ -17,6 +17,7 @@ from .contracts import (
     ZoneProfile,
 )
 from .journal.builder import build_journal
+from .journal.tracks import repair_tracks
 from .journal.zones import CORE_ZONES, estimate_zones
 from .reasoning.catalog import load_catalog
 from .reasoning.llm import auto_zones, llm_candidates
@@ -146,6 +147,9 @@ def run_pipeline(
         objects.warnings.extend(read_states(frames, objects, settings, deadline, output / "state_crops"))
         timings["object_states"] = time.monotonic() - started
     write_json(output / "object_journal.json", objects)
+    if settings.track_repair:
+        # The saved object journal keeps the tracker's ids; zones and the journal read the repaired tracks.
+        repair_tracks(objects)
     if not zones.zones and settings.auto_zones:
         progress("zones", 0.6)
         started = time.monotonic()
@@ -170,12 +174,7 @@ def run_pipeline(
     progress("actions", 0.64)
     started = time.monotonic()
     journal = build_journal(
-        objects,
-        zones,
-        metadata["duration_sec"],
-        settings.sample_fps,
-        settings.cashier_presence,
-        settings.track_repair,
+        objects, zones, metadata["duration_sec"], settings.sample_fps, settings.cashier_presence
     )
     write_json(output / "action_journal.json", journal)
     warnings.extend(journal.warnings)
