@@ -1,0 +1,99 @@
+"""Track repair: one label per track among confusable classes, and tracks broken by the tracker joined."""
+
+from forte_guard.contracts import Box, Detection, ObjectFrame, ObjectJournal, Zone, ZoneProfile
+from forte_guard.journal.builder import build_journal
+from forte_guard.journal.tracks import repair_tracks
+
+CASHIER = ("cashier", "person", [0.05, 0.1, 0.35, 0.8], 0.9)
+CLIENT = ("client", "person", [0.65, 0.1, 0.95, 0.8], 0.9)
+PROFILE = ZoneProfile(
+    source="synthetic",
+    zones=[
+        Zone(name="cashier_area", box=Box(x1=0, y1=0, x2=0.4, y2=1)),
+        Zone(name="client_area", box=Box(x1=0.6, y1=0, x2=1, y2=1)),
+    ],
+)
+
+
+def _objects(frames) -> ObjectJournal:
+    def det(track_id, label, box, confidence):
+        return Detection(
+            track_id=track_id, label=label, confidence=confidence, box=Box(x1=box[0], y1=box[1], x2=box[2], y2=box[3])
+        )
+
+    return ObjectJournal(
+        backend="synthetic-replay",
+        supported_classes=["person", "money", "document", "bag"],
+        frames=[
+            ObjectFrame(frame_id=f"f{i:06d}", timestamp_sec=i / 5, detections=[det(*item) for item in items])
+            for i, items in enumerate(frames)
+        ],
+    )
+
+
+def _stack(track_id, x, label="money", confidence=0.8):
+    return (track_id, label, [x, 0.45, x + 0.05, 0.5], confidence)
+
+
+def _track_ids(objects, label):
+    return {item.track_id for frame in objects.frames for item in frame.detections if item.label == label}
+
+
+def _events(journal, kind):
+    return [event for event in journal.actions if event.type == kind]
+
+
+def test_cash_stack_read_as_a_document_for_a_moment_stays_cash():
+    # Three confident samples of money outweigh three weak "document" samples of the same track.
+    frames = [[CASHIER, CLIENT, _stack("s1", 0.7)] for _ in range(3)]
+    frames += [[CASHIER, CLIENT, _stack("s1", 0.7, "document", 0.45)] for _ in range(3)]
+    frames += [[CASHIER, CLIENT] for _ in range(5)]
+    assert _events(build_journal(_objects(frames), PROFILE, 3, 5, track_repair=False), "document_presented")
+    objects = _objects(frames)
+    journal = build_journal(objects, PROFILE, 3, 5)
+    assert _events(journal, "document_presented") == []
+    assert _track_ids(objects, "document") == set()
+    assert objects.frames[3].detections[2].attributes["raw_label"] == "document"
+
+
+def test_a_track_seen_only_as_a_document_is_still_presented():
+    frames = [[CASHIER, CLIENT, _stack("d1", 0.7, "document", 0.6)] for _ in range(5)]
+    journal = build_journal(_objects(frames), PROFILE, 1, 5)
+    assert len(_events(journal, "document_presented")) == 1
+
+
+def test_cash_stack_lost_for_a_moment_keeps_its_track():
+    frames = [[CASHIER, _stack("s1", 0.2)] for _ in range(5)] + [[CASHIER] for _ in range(2)]
+    frames += [[CASHIER, _stack("s2", 0.3)] for _ in range(4)]
+    objects = repair_tracks(_objects(frames))
+    assert _track_ids(objects, "money") == {"s1"}
+    assert objects.frames[7].detections[1].attributes["raw_track_id"] == "s2"
+
+
+def test_tracks_are_not_joined_when_both_are_visible_too_late_or_too_far():
+    overlap = [[_stack("s1", 0.2)] for _ in range(5)] + [[_stack("s1", 0.2), _stack("s2", 0.25)]]
+    overlap += [[_stack("s2", 0.25)] for _ in range(3)]
+    late = [[_stack("s1", 0.2)] for _ in range(5)] + [[] for _ in range(10)] + [[_stack("s2", 0.2)]]
+    far = [[_stack("s1", 0.1)] for _ in range(5)] + [[_stack("s2", 0.5)] for _ in range(3)]
+    for frames in (overlap, late, far):
+        assert _track_ids(repair_tracks(_objects(frames)), "money") == {"s1", "s2"}
+
+
+def test_tracks_of_different_classes_are_not_joined():
+    frames = [[_stack("s1", 0.2)] for _ in range(5)] + [[_stack("b1", 0.2, "bag")] for _ in range(3)]
+    objects = repair_tracks(_objects(frames))
+    assert _track_ids(objects, "money") == {"s1"} and _track_ids(objects, "bag") == {"b1"}
+
+
+def test_client_lost_for_a_moment_stays_one_service_session():
+    box = CLIENT[2]
+    frames = [[CASHIER, ("k1", "person", box, 0.9)] for _ in range(10)] + [[CASHIER] for _ in range(3)]
+    frames += [[CASHIER, ("k2", "person", box, 0.9)] for _ in range(10)]
+    assert len(_events(build_journal(_objects(frames), PROFILE, 5, 5, track_repair=False), "client_observed")) == 2
+    assert len(_events(build_journal(_objects(frames), PROFILE, 5, 5), "client_observed")) == 1
+
+
+def test_next_client_elsewhere_at_the_counter_is_a_new_session():
+    frames = [[CASHIER, ("k1", "person", [0.65, 0.05, 0.95, 0.5], 0.9)] for _ in range(10)] + [[CASHIER]]
+    frames += [[CASHIER, ("k2", "person", [0.65, 0.5, 0.95, 0.98], 0.9)] for _ in range(10)]
+    assert len(_events(build_journal(_objects(frames), PROFILE, 5, 5), "client_observed")) == 2

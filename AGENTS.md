@@ -104,7 +104,7 @@ API жюри (ТЗ §10), менять нельзя:
 |---|---|---|---|
 | 0 Кадры | MOV → JPEG 5 fps с реальными таймкодами | `video.py: sample_video` | есть |
 | 1 Детектор | RF-DETR, дообученный на `person, hand, money, safe, door, bag` | `vision/detector.py`: YOLO-World zero-shot по текстовым промптам `config/detector.json` (Ultralytics, AGPL) | заглушка: не дообучен |
-| 2 Трекер | ByteTrack; сырые детекции сохраняются для боксов на доказательствах | `model.track(..., tracker="bytetrack.yaml")` → `object_journal.json` | есть для YOLO; для RF-DETR нужен адаптер |
+| 2 Трекер | ByteTrack; сырые детекции сохраняются для боксов на доказательствах | `model.track(..., tracker="bytetrack.yaml")` → `object_journal.json` (сырой); перед журналом `journal/tracks.py`: один класс на трек (`money`/`document`) и склейка оборванных треков денег и людей | есть для YOLO; для RF-DETR нужен адаптер |
 | 3 Таблица состояний | роль на трек, зона объекта, чья рука, у кого деньги — по каждому кадру | смешано с событиями в `journal/builder.py`; зоны — прямоугольники, `config/zones.json` пуст, работают автозоны | частично |
 | 4 Сглаживание | голосование большинством в окне (5 кадров = 1 с) | `StableValue` (N кадров подряд) | другой метод |
 | 5 Лог действий | события с id, t, conf и список «не определяется» | `ActionJournal.actions/states`, `unsupported_actions` | частично |
@@ -177,6 +177,7 @@ python scripts/check_service.py --url http://127.0.0.1:8001   # сквозная
 | `FORTE_LLM_MODEL`, `FORTE_ZONE_MODEL`, `FORTE_JUDGE_MODEL` | LLM-резонер, vision-модель автозон и судья бенчмарка — по умолчанию одна `gemma4:26b` (одна модель в памяти GPU вместо двух) |
 | `FORTE_LLM_ENABLED`, `FORTE_AUTO_ZONES` | включение ветки LLM и автозон |
 | `FORTE_CASHIER_PRESENCE` | как фиксировать уход кассира: `zone` (по умолчанию, рабочее место пусто N секунд) или `track` (трек виден вне зоны) |
+| `FORTE_TRACK_REPAIR` | постобработка треков перед журналом: один класс на трек и склейка оборванных треков (по умолчанию `true`) |
 | `FORTE_WEB_ACCESS`, `FORTE_ALLOWED_CLIENTS` | режим входа в интерфейс (`api_key`, `open`, `trusted_clients`, `guest` — публичный сайт: гость видит только свои проверки) и список разрешённых IP |
 | `FORTE_JOB_TIMEOUT_SEC` | лимит задачи, включая ожидание в очереди (285 с) |
 | `FORTE_BENCHMARK_ENABLED`, `FORTE_BENCHMARK_LABELS`, `FORTE_BENCHMARK_VIDEOS` | бенчмарк: включение, путь или ссылка на разметку, папка видео. Пути у каждого свои, только в своём `.env` |

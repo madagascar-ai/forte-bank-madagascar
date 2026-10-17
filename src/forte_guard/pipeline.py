@@ -116,6 +116,7 @@ def run_pipeline(
             "zone_model": settings.zone_model,
             "llm_enabled": settings.llm_enabled,
             "cashier_presence": settings.cashier_presence,
+            "track_repair": settings.track_repair,
             "verification_mode": "structural_only",
             "labels_used": False,
         },
@@ -163,7 +164,12 @@ def run_pipeline(
     progress("actions", 0.64)
     started = time.monotonic()
     journal = build_journal(
-        objects, zones, metadata["duration_sec"], settings.sample_fps, settings.cashier_presence
+        objects,
+        zones,
+        metadata["duration_sec"],
+        settings.sample_fps,
+        settings.cashier_presence,
+        settings.track_repair,
     )
     write_json(output / "action_journal.json", journal)
     warnings.extend(journal.warnings)

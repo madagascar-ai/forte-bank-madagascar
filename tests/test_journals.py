@@ -105,9 +105,17 @@ def test_zone_presence_survives_a_fragmented_cashier_track():
     # The tracker loses the cashier and re-identifies her as c5; she then walks away in view.
     frames = [[CLIENT, ("c1" if i < 10 else "c5", "person", SEATED if i < 20 else AWAY)] for i in range(40)]
     objects, profile = _scene(frames)
-    assert _departures(build_journal(objects, profile, 8, 5)) == []
-    departures = _departures(build_journal(objects, profile, 8, 5, presence="zone"))
+    assert _departures(build_journal(objects, profile, 8, 5, track_repair=False)) == []
+    objects, profile = _scene(frames)
+    departures = _departures(build_journal(objects, profile, 8, 5, presence="zone", track_repair=False))
     assert len(departures) == 1 and departures[0].start_sec == 4.0
+
+
+def test_track_repair_lets_track_presence_follow_a_fragmented_cashier():
+    frames = [[CLIENT, ("c1" if i < 10 else "c5", "person", SEATED if i < 20 else AWAY)] for i in range(40)]
+    objects, profile = _scene(frames)
+    departures = _departures(build_journal(objects, profile, 8, 5))
+    assert len(departures) == 1 and departures[0].actor_ids == ["c1"]
 
 
 def test_zone_presence_reports_leaving_through_the_edge_after_the_wait():
