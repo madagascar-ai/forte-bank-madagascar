@@ -59,3 +59,106 @@ def test_closed_door_does_not_prove_locked(demo):
     journal = build_journal(ObjectJournal.model_validate_json(path.read_text()), profile, 8, 5)
     assert "safe_locked" in journal.unsupported_actions
     assert not any(event.type == "safe_locked" for event in journal.actions)
+
+
+def _scene(frames):
+    from forte_guard.contracts import Box, Detection, ObjectFrame, Zone, ZoneProfile
+
+    def det(track_id, label, box):
+        return Detection(
+            track_id=track_id, label=label, confidence=0.9, box=Box(x1=box[0], y1=box[1], x2=box[2], y2=box[3])
+        )
+
+    objects = ObjectJournal(
+        backend="synthetic-replay",
+        supported_classes=["person", "hand"],
+        frames=[
+            ObjectFrame(
+                frame_id=f"f{i:06d}",
+                timestamp_sec=i / 5,
+                detections=[det(*item) for item in items],
+            )
+            for i, items in enumerate(frames)
+        ],
+    )
+    profile = ZoneProfile(
+        source="synthetic",
+        zones=[
+            Zone(name="cashier_area", box=Box(x1=0, y1=0, x2=0.4, y2=1)),
+            Zone(name="client_area", box=Box(x1=0.6, y1=0, x2=1, y2=1)),
+        ],
+    )
+    return objects, profile
+
+
+SEATED = [0.05, 0.1, 0.35, 0.8]
+AT_EDGE = [0.3, 0.1, 0.42, 0.8]
+AWAY = [0.43, 0.72, 0.57, 0.97]
+CLIENT = ("client", "person", [0.65, 0.1, 0.95, 0.8])
+
+
+def _departures(journal):
+    return [event for event in journal.actions if event.type == "cashier_left_workstation"]
+
+
+def test_zone_presence_survives_a_fragmented_cashier_track():
+    # The tracker loses the cashier and re-identifies her as c5; she then walks away in view.
+    frames = [[CLIENT, ("c1" if i < 10 else "c5", "person", SEATED if i < 20 else AWAY)] for i in range(40)]
+    objects, profile = _scene(frames)
+    assert _departures(build_journal(objects, profile, 8, 5)) == []
+    departures = _departures(build_journal(objects, profile, 8, 5, presence="zone"))
+    assert len(departures) == 1 and departures[0].start_sec == 4.0
+
+
+def test_zone_presence_reports_leaving_through_the_edge_after_the_wait():
+    frames = [[CLIENT, *([("c1", "person", SEATED if i < 5 else AT_EDGE)] if i < 10 else [])] for i in range(50)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 10, 5, presence="zone")
+    departures = _departures(journal)
+    assert len(departures) == 1 and departures[0].start_sec == 2.0
+    assert departures[0].end_sec >= 1.8 + 3.0
+    assert any(state.name == "cashier_present" and state.value is False for state in journal.states)
+
+
+def test_zone_presence_waits_longer_when_the_cashier_vanishes_mid_area():
+    frames = [[CLIENT, *([("c1", "person", SEATED)] if i < 10 else [])] for i in range(45)]
+    short, profile = _scene(frames[:30])
+    assert _departures(build_journal(short, profile, 6, 5, presence="zone")) == []
+    long, profile = _scene(frames)
+    departures = _departures(build_journal(long, profile, 9, 5, presence="zone"))
+    assert len(departures) == 1 and departures[0].start_sec == 2.0
+
+
+def test_zone_presence_stays_unknown_when_nothing_is_detected():
+    frames = [[CLIENT, ("c1", "person", SEATED)] if i < 10 else [] for i in range(60)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 12, 5, presence="zone")
+    assert _departures(journal) == []
+    assert not any(state.name == "cashier_present" and state.value is False for state in journal.states)
+
+
+def test_zone_presence_counts_a_hand_at_the_workstation():
+    hand = ("h1", "hand", [0.2, 0.5, 0.24, 0.54])
+    frames = [[CLIENT, hand, *([("c1", "person", SEATED)] if i < 10 else [])] for i in range(60)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 12, 5, presence="zone")
+    assert _departures(journal) == []
+    assert not any(state.name == "cashier_present" and state.value is False for state in journal.states)
+
+
+def test_zone_presence_reports_the_return():
+    frames = [[CLIENT, *([("c1", "person", SEATED)] if i < 10 or i >= 45 else [])] for i in range(55)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 11, 5, presence="zone")
+    assert len(_departures(journal)) == 1
+    assert [event.type for event in journal.actions if event.type == "cashier_returned"] == ["cashier_returned"]
+
+
+def test_zone_presence_keeps_demo_behaviour(demo, tmp_path, settings):
+    _, path, profile = demo
+    journal = build_journal(ObjectJournal.model_validate_json(path.read_text()), profile, 8, 5, presence="zone")
+    departures = _departures(journal)
+    assert len(departures) == 1 and 3 <= departures[0].start_sec <= 3.4
+    _, lost, lost_profile = create_demo(tmp_path / "occlusion", disappear=True)
+    journal = build_journal(ObjectJournal.model_validate_json(lost.read_text()), lost_profile, 8, 5, presence="zone")
+    assert _departures(journal) == []

@@ -73,6 +73,7 @@ def run_pipeline(
             "llm_model": settings.llm_model,
             "zone_model": settings.zone_model,
             "llm_enabled": settings.llm_enabled,
+            "cashier_presence": settings.cashier_presence,
             "verification_mode": "structural_only",
             "labels_used": False,
         },
@@ -119,7 +120,9 @@ def run_pipeline(
     deadline.remaining()
     progress("actions", 0.64)
     started = time.monotonic()
-    journal = build_journal(objects, zones, metadata["duration_sec"], settings.sample_fps)
+    journal = build_journal(
+        objects, zones, metadata["duration_sec"], settings.sample_fps, settings.cashier_presence
+    )
     write_json(output / "action_journal.json", journal)
     warnings.extend(journal.warnings)
     timings["actions"] = time.monotonic() - started

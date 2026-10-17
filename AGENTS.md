@@ -176,6 +176,7 @@ python scripts/check_service.py --url http://127.0.0.1:8001   # сквозная
 | `FORTE_OLLAMA_URL` | Ollama; GPU-хост команды в Tailscale — `http://100.118.149.106:11434` |
 | `FORTE_LLM_MODEL`, `FORTE_ZONE_MODEL`, `FORTE_JUDGE_MODEL` | LLM-резонер (на общем сервисе `qwen3:30b`), vision-модель автозон (`gemma4:26b`), судья бенчмарка |
 | `FORTE_LLM_ENABLED`, `FORTE_AUTO_ZONES` | включение ветки LLM и автозон |
+| `FORTE_CASHIER_PRESENCE` | как фиксировать уход кассира: `track` (по умолчанию, трек виден вне зоны) или `zone` (рабочее место пусто N секунд) |
 | `FORTE_WEB_ACCESS`, `FORTE_ALLOWED_CLIENTS` | режим входа в интерфейс (`api_key`, `open`, `trusted_clients`) и список разрешённых IP |
 | `FORTE_JOB_TIMEOUT_SEC` | лимит задачи, включая ожидание в очереди (285 с) |
 | `FORTE_BENCHMARK_ENABLED`, `FORTE_BENCHMARK_LABELS`, `FORTE_BENCHMARK_VIDEOS` | бенчмарк: включение, путь или ссылка на разметку, папка видео. Пути у каждого свои, только в своём `.env` |

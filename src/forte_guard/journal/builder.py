@@ -4,7 +4,7 @@ import math
 from collections import Counter, defaultdict
 from itertools import pairwise
 
-from ..contracts import Action, ActionJournal, Batch, Detection, ObjectJournal, State, ZoneProfile
+from ..contracts import Action, ActionJournal, Batch, Box, Detection, ObjectJournal, State, ZoneProfile
 
 # The detector vocabulary evolves; the journal keeps one internal name per object kind.
 LABEL_ALIASES = {
@@ -25,6 +25,11 @@ COUNT_HAND_WINDOW_SEC = 2.0
 # Objects that should not stay at the cashier's workstation (or only while she is there).
 WORKSTATION_ITEMS = ("personal_item", "phone", "cash_bag", "stamp", "folder")
 WORKSTATION_ZONES = {"cashier_area", "counter_area"}
+# Presence mode "zone": an empty workstation counts as an absence only after this wait. Vanishing in the
+# middle of the area is more likely bending down or occlusion than leaving, so it waits longer.
+ABSENT_MIN_SEC = 3.0
+ABSENT_MIDZONE_SEC = 6.0
+ZONE_EDGE_MARGIN = 0.05
 TRANSITIONS = {"open": "opened", "closed": "closed", "on": "turned_on", "off": "turned_off"}
 
 
@@ -97,6 +102,70 @@ class StableValue:
         return previous, self.value
 
 
+class ZonePresence:
+    """Cashier presence from the workstation itself, independent of which track id sits there.
+
+    An empty workstation becomes an observed absence only after a wait, and only while the rest of
+    the frame is still detected; a vanished track alone stays unknown.
+    """
+
+    def __init__(self, required: int, area: Box | None, exit_area: Box | None):
+        self.required = required
+        self.area = area
+        self.exit_area = exit_area
+        self.value = None
+        self.pending = None
+        self.count = 0
+        self.seen = False
+        self.last_in: float | None = None
+        self.empty_since: float | None = None
+        self.edge = False
+        self.ids: list[str] = []
+
+    def _near_exit(self, point: tuple[float, float]) -> bool:
+        x, y = point
+        a = self.area
+        near_edge = min(x - a.x1, a.x2 - x, y - a.y1, a.y2 - y) <= ZONE_EDGE_MARGIN
+        return near_edge or bool(self.exit_area and self.exit_area.contains(point))
+
+    def observe(self, t: float, people: list[Detection], hands: list[Detection], walked_away: bool, alive: bool):
+        if self.area is None:
+            return None
+        inside = [p for p in people if self.area.contains(p.box.center)]
+        if inside or any(self.area.contains(h.box.center) for h in hands):
+            self.seen, self.last_in, self.empty_since = True, t, None
+            if inside:
+                self.ids = [p.track_id for p in inside]
+                self.edge = any(self._near_exit(p.box.center) for p in inside)
+            return True
+        if not alive or not self.seen:
+            return None
+        if self.empty_since is None:
+            self.empty_since = t
+        wait = ABSENT_MIN_SEC if self.edge else ABSENT_MIDZONE_SEC
+        if walked_away or t - self.last_in >= wait:
+            return False
+        return None
+
+    def update(self, observed):
+        """Return (previous, current) like StableValue, but an unknown gap keeps the confirmed value."""
+        previous = self.value
+        if observed is None:
+            self.pending, self.count = None, 0
+            return previous, None
+        if observed == self.value:
+            self.pending, self.count = None, 0
+        else:
+            if observed == self.pending:
+                self.count += 1
+            else:
+                self.pending, self.count = observed, 1
+            if self.count >= self.required:
+                self.value = observed
+                self.pending, self.count = None, 0
+        return previous, self.value
+
+
 def _contact(money: Detection, hands: list[Detection], people: list[Detection]):
     owners = set()
     for hand in hands:
@@ -119,7 +188,9 @@ def _contact(money: Detection, hands: list[Detection], people: list[Detection]):
     return next(iter(owners)) if len(owners) == 1 else None
 
 
-def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float, fps: float) -> ActionJournal:
+def build_journal(
+    objects: ObjectJournal, profile: ZoneProfile, duration: float, fps: float, presence: str = "track"
+) -> ActionJournal:
     for frame in objects.frames:
         for item in frame.detections:
             item.label = LABEL_ALIASES.get(item.label, item.label)
@@ -156,6 +227,8 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
     ]
     required = max(1, math.ceil(fps * 0.4))
     smoothers = defaultdict(lambda: StableValue(required))
+    areas = {zone.name: zone.box for zone in profile.zones}
+    workstation = ZonePresence(required, areas.get("cashier_area"), areas.get("exit_area"))
     open_states: dict[tuple, State] = {}
     active_session: str | None = None
     sessions: dict[str, str] = {}
@@ -273,17 +346,35 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
             for key in cashier_ids
             if key in visible and person_in_zone(visible[key], profile, "cashier_area")
         ]
-        present = (
-            True
-            if inside
-            else (False if cashier_ids and all(key in visible for key in cashier_ids) else None)
-        )
-        old, stable_present = smoothers["cashier_present"].update(present)
         transition_ids = []
-        if old is True and stable_present is False:
-            transition_ids = [event("cashier_left_workstation", frame, cashier_ids).event_id]
-        elif old is False and stable_present is True:
-            transition_ids = [event("cashier_returned", frame, cashier_ids).event_id]
+        if presence == "zone":
+            present = workstation.observe(
+                frame.timestamp_sec,
+                [p for p in people if roles.get(p.track_id) != "client"],
+                hands,
+                walked_away=any(key in visible for key in cashier_ids),
+                alive=bool(frame.detections),
+            )
+            old, stable_present = workstation.update(present)
+            if old is True and stable_present is False:
+                transition_ids = [
+                    event(
+                        "cashier_left_workstation", frame, workstation.ids, start=workstation.empty_since
+                    ).event_id
+                ]
+            elif old is False and stable_present is True:
+                transition_ids = [event("cashier_returned", frame, workstation.ids).event_id]
+        else:
+            present = (
+                True
+                if inside
+                else (False if cashier_ids and all(key in visible for key in cashier_ids) else None)
+            )
+            old, stable_present = smoothers["cashier_present"].update(present)
+            if old is True and stable_present is False:
+                transition_ids = [event("cashier_left_workstation", frame, cashier_ids).event_id]
+            elif old is False and stable_present is True:
+                transition_ids = [event("cashier_returned", frame, cashier_ids).event_id]
         state("cashier_present", stable_present, frame, source_events=transition_ids)
         state("client_present", True if clients else None, frame)
 

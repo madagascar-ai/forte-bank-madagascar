@@ -53,6 +53,8 @@ class Settings:
     sample_fps: float = field(default_factory=lambda: float(os.getenv("FORTE_SAMPLE_FPS", "5")))
     llm_enabled: bool = field(default_factory=lambda: _bool("FORTE_LLM_ENABLED", True))
     auto_zones: bool = field(default_factory=lambda: _bool("FORTE_AUTO_ZONES", True))
+    # "track": absence only when a cashier track is seen away; "zone": also when the workstation stays empty.
+    cashier_presence: str = field(default_factory=lambda: os.getenv("FORTE_CASHIER_PRESENCE", "track"))
     ollama_url: str = field(default_factory=lambda: os.getenv("FORTE_OLLAMA_URL", "http://127.0.0.1:11434"))
     llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma3:4b"))
     # The zone fallback sends a frame, so it needs a vision-capable model; text-only LLMs cannot do it.
@@ -96,6 +98,8 @@ class Settings:
             raise ValueError("FORTE_SAMPLE_FPS must be in (0, 30]")
         if self.detector not in {*OPEN_VOCABULARY, "yolo", "replay"}:
             raise ValueError("FORTE_DETECTOR must be world, yoloe, yolo, or replay")
+        if self.cashier_presence not in {"track", "zone"}:
+            raise ValueError("FORTE_CASHIER_PRESENCE must be track or zone")
         url = urlparse(self.ollama_url)
         if url.scheme != "http" or not is_team_llm_host(url.hostname):
             raise ValueError(
