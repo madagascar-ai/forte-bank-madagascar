@@ -421,7 +421,7 @@ async function renderFrame(index) {
       ctx.font = "12px sans-serif";
       for (const d of f.detections) {
         const b = d.box;
-        ctx.strokeStyle = d.label === "person" ? "#42d9a2" : "#ffba67";
+        ctx.strokeStyle = d.label === "person" ? "#00c8f0" : "#f4917f";
         ctx.fillStyle = ctx.strokeStyle;
         ctx.strokeRect(
           b.x1 * c.width,
