@@ -254,8 +254,6 @@ async function renderSummary(result, id) {
   show("summary-intro", false);
   show("summary-description-card", false);
   show("summary-observed-card", false);
-  show("summary-checks", false);
-  show("warnings-details", true);
   let summary;
   try {
     summary = await json(`/api/v1/jobs/${id}/artifacts/summary`);
@@ -266,7 +264,6 @@ async function renderSummary(result, id) {
   const observed = summary.observed || [];
   if (noViolation) {
     show("summary-intro", true);
-    show("warnings-details", false);
     if (summary.description) {
       show("summary-description-card", true);
       $("summary-description").textContent = summary.description;
@@ -275,28 +272,6 @@ async function renderSummary(result, id) {
       show("summary-observed-card", true);
       $("summary-observed").replaceChildren(...observed.map((text) => el("li", text)));
     }
-  }
-  const performed = summary.checks_performed || [];
-  const notPerformed = summary.checks_not_performed || [];
-  // Not shown when there's nothing to check against: "checked" alone already implies "not checked"
-  // is everything else, and listing it again just adds noise to a clean result.
-  show("summary-not-performed-block", !noViolation);
-  $("summary-checks-label").textContent = noViolation
-    ? "Проверено"
-    : "Проверено / не проверялось";
-  if (performed.length || (!noViolation && notPerformed.length)) {
-    show("summary-checks", true);
-    $("summary-performed").replaceChildren(
-      ...performed.map((check) => {
-        const item = el("li", check.title);
-        if (check.clauses?.length)
-          item.append(el("small", " — " + check.clauses.join("; ")));
-        return item;
-      }),
-    );
-    $("summary-not-performed").replaceChildren(
-      ...notPerformed.map((text) => el("li", text)),
-    );
   }
 }
 async function renderResult(result, generation, id) {
@@ -383,7 +358,6 @@ async function renderResult(result, generation, id) {
     card.append(source);
     $("findings").append(card);
   }
-  $("warnings").replaceChildren(...result.warnings.map((w) => el("li", w)));
   await renderSummary(result, id);
   const [actions, objects, candidates] = await Promise.all(
     ["action_journal", "object_journal", "candidates"].map((name) =>
