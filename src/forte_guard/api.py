@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import os
 import re
 import shutil
 import time
@@ -22,7 +23,7 @@ from .contracts import ZoneProfile
 from .pipeline import run_pipeline
 from .readiness import inspect_readiness
 from .settings import Settings
-from .storage import JobStore
+from .storage import JobStore, MaintenanceError
 
 logger = logging.getLogger("forte_guard")
 JOB_PATTERN = re.compile(r"^[0-9a-f]{32}$")
@@ -136,10 +137,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "detector_ready": settings.model_path.is_file(),
             "local_only": True,
             "verification_mode": "structural_only",
+            "release": os.getenv("FORTE_RELEASE_SHA", "workspace"),
         }
 
     @app.post("/api/v1/analyze", dependencies=[Depends(require_key)], status_code=202)
     async def analyze(file: Annotated[UploadFile, File()], zones: Annotated[str | None, Form()] = None):
+        if store.maintenance():
+            raise HTTPException(
+                503,
+                "Сервис обновляется. Повторите загрузку через несколько секунд.",
+                headers={"Retry-After": "10"},
+            )
         filename = Path((file.filename or "video.mov").replace("\\", "/")).name
         if Path(filename).suffix.lower() not in {".mov", ".mp4"}:
             raise HTTPException(415, "Поддерживаются MOV и MP4")
@@ -167,7 +175,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     output.write(chunk)
             if size == 0:
                 raise HTTPException(422, "Загружен пустой файл")
-            store.create(job_id, filename, profile.model_dump() if profile else None)
+            try:
+                store.create(job_id, filename, profile.model_dump() if profile else None)
+            except MaintenanceError:
+                raise HTTPException(
+                    503,
+                    "Сервис обновляется. Повторите загрузку через несколько секунд.",
+                    headers={"Retry-After": "10"},
+                ) from None
             executor.submit(worker, job_id)
         except Exception:
             if store.get(job_id) is None:
@@ -181,6 +196,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def readiness():
         report = inspect_readiness(settings)
         return JSONResponse(report, status_code=200 if report["status"] == "ready" else 503)
+
+    @app.get("/api/v1/deployment", dependencies=[Depends(require_key)])
+    def deployment():
+        path = os.getenv("FORTE_DEPLOY_STATE")
+        if not path:
+            return {"managed": False, "release": os.getenv("FORTE_RELEASE_SHA", "workspace")}
+        try:
+            report = json.loads(Path(path).read_text())
+        except (OSError, ValueError):
+            report = {}
+        fields = (
+            "state",
+            "active_sha",
+            "pending_sha",
+            "previous_sha",
+            "checked_at",
+            "deployed_at",
+            "ci_url",
+            "error",
+        )
+        return {
+            "managed": True,
+            **{key: report.get(key) for key in fields},
+            "maintenance": store.maintenance(),
+        }
 
     @app.get("/api/v1/jobs", dependencies=[Depends(require_key)])
     def jobs():

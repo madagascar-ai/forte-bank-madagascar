@@ -9,6 +9,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
+class MaintenanceError(RuntimeError):
+    pass
+
+
 def write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(value, BaseModel):
@@ -29,6 +33,9 @@ class JobStore:
                 job_id TEXT PRIMARY KEY, filename TEXT NOT NULL, status TEXT NOT NULL,
                 stage TEXT NOT NULL, progress REAL NOT NULL, created_at REAL NOT NULL,
                 error TEXT, zones TEXT)""")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS service_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
             if recover:
                 conn.execute(
                     "UPDATE jobs SET status='failed', stage='interrupted', error=? WHERE status='processing'",
@@ -47,10 +54,20 @@ class JobStore:
     def create(self, job_id: str, filename: str, zones: dict | None = None):
         self.folder(job_id).mkdir(parents=True, exist_ok=True)
         with self.lock, self.connect() as conn:
+            # The deployer uses the same SQLite write lock when enabling maintenance.
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT value FROM service_state WHERE key='maintenance'").fetchone()
+            if row and row[0] == "1":
+                raise MaintenanceError("Service is updating")
             conn.execute(
                 "INSERT INTO jobs VALUES (?,?,'processing','queued',0,?,NULL,?)",
                 (job_id, filename, time.time(), json.dumps(zones) if zones else None),
             )
+
+    def maintenance(self):
+        with self.connect() as conn:
+            row = conn.execute("SELECT value FROM service_state WHERE key='maintenance'").fetchone()
+        return bool(row and row[0] == "1")
 
     def update(self, job_id: str, stage: str, progress: float, status="processing", error=None):
         with self.lock, self.connect() as conn:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -16,6 +17,7 @@ def main():
     serve = commands.add_parser("serve", help="Run the local API and interface")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
+    serve.add_argument("--deployment-id", help=argparse.SUPPRESS)
     analyze = commands.add_parser("analyze", help="Run the same pipeline without a web server")
     analyze.add_argument("video", type=Path)
     analyze.add_argument("--output", type=Path)
@@ -26,11 +28,12 @@ def main():
     settings = Settings()
     settings.validate()
     if args.command == "serve":
-        import os
-
         import uvicorn
 
         from .api import create_app
+
+        if args.deployment_id:
+            os.environ["FORTE_RELEASE_SHA"] = args.deployment_id
 
         uvicorn.run(
             create_app(settings),
@@ -38,6 +41,7 @@ def main():
             port=args.port or int(os.getenv("FORTE_PORT", "8000")),
             # IP restrictions must use the socket peer, never a user-supplied forwarded header.
             proxy_headers=False,
+            access_log=not bool(args.deployment_id),
         )
     else:
         from .pipeline import run_pipeline
