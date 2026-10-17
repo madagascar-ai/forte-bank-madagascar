@@ -299,7 +299,8 @@ class Agent:
                 check=True,
             )
         subprocess.run(
-            ["git", "--git-dir", str(mirror), "fetch", "origin", "refs/heads/main:refs/heads/main"],
+            # "+" accepts a rewritten main (force-push); only a SHA with green CI is ever deployed.
+            ["git", "--git-dir", str(mirror), "fetch", "origin", "+refs/heads/main:refs/heads/main"],
             capture_output=True,
             check=True,
             timeout=60,

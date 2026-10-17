@@ -173,3 +173,18 @@ def test_deployment_endpoint_exposes_version_and_never_secrets(settings, tmp_pat
         assert response.json()["active_sha"] == "a" * 40
         assert response.json()["managed"] is True
         assert settings.api_key not in response.text
+
+
+def test_mirror_follows_a_force_pushed_main(tmp_path, monkeypatch):
+    (tmp_path / "repository.git").mkdir()
+    commands = []
+
+    def record(command, **kwargs):
+        commands.append(command)
+        raise RuntimeError("stop after fetch")
+
+    monkeypatch.setattr("scripts.autodeploy.subprocess.run", record)
+    with pytest.raises(RuntimeError, match="stop after fetch"):
+        Agent(tmp_path).prepare("c" * 40)
+    fetch = next(command for command in commands if "fetch" in command)
+    assert "+refs/heads/main:refs/heads/main" in fetch
