@@ -63,6 +63,15 @@ class Settings:
     zone_model: str = field(
         default_factory=lambda: os.getenv("FORTE_ZONE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma4:26b")
     )
+    # Door/safe open-closed and laptop on-off from crops of detected objects, read by the local vision
+    # model. Off by default until the benchmark shows a gain (AGENTS.md 8.5); bounded per video.
+    object_states: bool = field(default_factory=lambda: _bool("FORTE_OBJECT_STATES", False))
+    states_model: str = field(
+        default_factory=lambda: os.getenv("FORTE_STATES_MODEL")
+        or os.getenv("FORTE_ZONE_MODEL")
+        or os.getenv("FORTE_LLM_MODEL", "gemma4:26b")
+    )
+    states_max_calls: int = field(default_factory=lambda: int(os.getenv("FORTE_STATES_MAX_CALLS", "120")))
     # Limits for keyless browser uploads (0 disables); API-key uploads are never limited.
     ui_max_queued: int = field(default_factory=lambda: int(os.getenv("FORTE_UI_MAX_QUEUED", "10")))
     ui_max_uploads_per_hour: int = field(

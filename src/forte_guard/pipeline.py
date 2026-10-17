@@ -26,6 +26,7 @@ from .settings import Settings
 from .storage import write_json
 from .video import Deadline, sample_video
 from .vision.detector import ReplayDetector, YoloTracker
+from .vision.states import read_states
 
 # Interface-only artifact (summary.json): never part of the jury contract (AnalysisResult/result.json).
 _OPENABLE_LABELS = {"door": "Дверь открывалась в кадре.", "safe": "Сейф открывался в кадре."}
@@ -117,6 +118,7 @@ def run_pipeline(
             "llm_enabled": settings.llm_enabled,
             "cashier_presence": settings.cashier_presence,
             "track_repair": settings.track_repair,
+            "object_states_model": settings.states_model if settings.object_states else None,
             "verification_mode": "structural_only",
             "labels_used": False,
         },
@@ -138,8 +140,12 @@ def run_pipeline(
     started = time.monotonic()
     detector = ReplayDetector(replay) if replay else YoloTracker(settings)
     objects = detector.run(frames, deadline, lambda value: progress("objects", 0.12 + 0.48 * value))
-    write_json(output / "object_journal.json", objects)
     timings["objects"] = time.monotonic() - started
+    if settings.object_states:
+        started = time.monotonic()
+        objects.warnings.extend(read_states(frames, objects, settings, deadline, output / "state_crops"))
+        timings["object_states"] = time.monotonic() - started
+    write_json(output / "object_journal.json", objects)
     if not zones.zones and settings.auto_zones:
         progress("zones", 0.6)
         started = time.monotonic()
