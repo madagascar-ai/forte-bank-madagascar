@@ -1,0 +1,19 @@
+{
+  "prompts": {
+    "person": "person",
+    "hand": "human hand",
+    "money": "banknotes",
+    "safe_open": "open safe",
+    "safe_closed": "closed safe",
+    "door_open": "open door",
+    "door_closed": "closed door",
+    "bag": "handbag",
+    "phone": "smartphone",
+    "laptop_open": "open laptop",
+    "laptop_closed": "closed laptop",
+    "document": "identity card",
+    "counting_machine": "banknote counting machine"
+  },
+  "aliases": {"cell phone": "phone", "handbag": "bag", "backpack": "bag", "laptop": "laptop"},
+  "notes": "Zero-shot baseline. Fine-tune and evaluate classes; prompts do not guarantee recognition accuracy."
+}

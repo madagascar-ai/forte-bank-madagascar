@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0",
+  "rules": [
+    {
+      "id": "cashier_left_during_service",
+      "title": "Признаки ухода кассира во время обслуживания",
+      "kind": "state",
+      "enabled": true,
+      "source_status": "needs_review",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "cashier_present": false,
+          "client_present": true,
+          "cash_on_counter": true,
+          "service_active": true
+        },
+        "min_duration_sec": 1.0,
+        "anchor_event": "cashier_left_workstation"
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций, постановление НБРК № 231 от 29.11.2019",
+        "clause": "пункт 22; применимость и редакция требуют проверки",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680"
+      },
+      "conditions": "Need observed service, visible departure and sufficient workstation coverage. Technical dwell time is not a legal grace period."
+    },
+    {
+      "id": "cash_from_previous_session",
+      "title": "Признаки смешивания денег разных клиентов",
+      "kind": "action",
+      "enabled": true,
+      "source_status": "needs_review",
+      "engine": {
+        "type": "event",
+        "event_type": "cash_batches_mixed_across_sessions",
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций, постановление НБРК № 231 от 29.11.2019",
+        "clause": "пункт 20; применимость и редакция требуют проверки",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680"
+      },
+      "conditions": "Batch provenance must be observed; two arbitrary piles do not establish different clients."
+    },
+    {
+      "id": "payout_without_observed_count",
+      "title": "Не наблюдался пересчёт выдаваемой части денег",
+      "kind": "omission",
+      "enabled": false,
+      "source_status": "needs_review",
+      "required_capabilities": [
+        "cash_counted"
+      ],
+      "engine": {
+        "type": "before_event",
+        "required_event": "cash_counted",
+        "closing_event": "cash_transferred",
+        "closing_attributes": {
+          "to_role": "client"
+        },
+        "same_object": true,
+        "required_context_flags": [
+          "packaging_exceptions_checked"
+        ]
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций, постановление НБРК № 231 от 29.11.2019",
+        "clause": "пункт 31 подпункт 4, пункт 32; проверить исключения и редакцию",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680"
+      },
+      "conditions": "Only with complete scenario coverage, reliable counting recognition and checked packaging exceptions."
+    }
+  ]
+}

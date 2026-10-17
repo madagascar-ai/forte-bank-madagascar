@@ -1,0 +1,17 @@
+.git
+.venv
+videos
+models
+data
+outputs
+tools
+*.xlsx
+*.mov
+*.mp4
+.env
+.env.*
+!.env.example
+docs
+Кейс_ForteBank.docx.md
+.pytest_cache
+__pycache__

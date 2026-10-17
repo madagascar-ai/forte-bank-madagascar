@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Forte Guard · Анализ кассовых операций</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/"
+        >forte<span>guard</span><small>VIDEO INTELLIGENCE</small></a
+      >
+      <div class="sidebar-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+      <button class="nav active" id="new-job">＋ Новая проверка</button>
+      <div class="sidebar-label">ПОСЛЕДНИЕ ПРОВЕРКИ</div>
+      <div id="history" class="history"></div>
+      <div class="local-status">
+        <i></i> Обработка в локальном контуре<small
+          >Видео остаются на сервере команды</small
+        >
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">КАССОВЫЕ ОПЕРАЦИИ</span>
+          <h1>Проверка видеозаписи</h1>
+        </div>
+        <span class="badge" id="server-status">Проверка сервиса…</span>
+      </header>
+      <section class="connection">
+        <label for="api-key">Ключ доступа</label
+        ><input
+          id="api-key"
+          type="password"
+          autocomplete="off"
+          placeholder="Вставьте API-ключ"
+        /><button id="connect" class="secondary">Подключить</button
+        ><span id="connection-status"></span>
+      </section>
+      <section id="upload-view">
+        <div class="intro">
+          <h2>От записи — к проверяемому событию</h2>
+          <p>
+            Загрузите видео работы кассира. Система построит журнал действий и
+            выделит признаки возможных нарушений.
+          </p>
+        </div>
+        <form id="upload-form">
+          <label class="dropzone" id="dropzone" for="video-file"
+            ><span class="upload-symbol">↥</span
+            ><strong id="file-title">Выберите видео или перетащите сюда</strong
+            ><span>MOV или MP4 · до 256 МБ · до 180 секунд</span
+            ><input
+              id="video-file"
+              type="file"
+              accept=".mov,.mp4,video/quicktime,video/mp4"
+          /></label>
+          <div id="zone-panel" class="card hidden">
+            <div class="section-heading">
+              <div>
+                <h3>Зоны на записи</h3>
+                <p>
+                  При необходимости обозначьте рабочие области прямоугольниками.
+                </p>
+              </div>
+              <button id="clear-zones" type="button" class="text-button">
+                Очистить
+              </button>
+            </div>
+            <div class="zone-toolbar">
+              <label
+                >Зона
+                <select id="zone-type">
+                  <option value="cashier_area">Рабочее место кассира</option>
+                  <option value="client_area">Клиентская сторона</option>
+                  <option value="counter_area">Поверхность стола</option>
+                  <option value="storage_area">Хранилище</option>
+                  <option value="exit_area">Зона выхода</option>
+                </select></label
+              ><span id="zone-count">Автоматическое определение</span>
+            </div>
+            <div class="canvas-wrap"><canvas id="zone-canvas"></canvas></div>
+            <video id="preview-video" muted playsinline class="hidden"></video>
+          </div>
+          <div class="submit-row">
+            <p>Результаты предназначены для последующей проверки человеком.</p>
+            <button id="analyze-button" class="primary" type="submit">
+              Начать анализ <span>→</span>
+            </button>
+          </div>
+        </form>
+      </section>
+      <section id="job-view" class="hidden">
+        <div class="job-heading">
+          <div>
+            <h2 id="job-title"></h2>
+            <p id="job-subtitle"></p>
+          </div>
+          <button id="download-json" class="secondary hidden">
+            Скачать JSON
+          </button>
+        </div>
+        <div id="processing" class="card">
+          <div class="section-heading">
+            <h3 id="stage-label">В очереди</h3>
+            <span id="progress-label">0%</span>
+          </div>
+          <div class="progress"><div id="progress-bar"></div></div>
+          <div class="pipeline" id="pipeline-stages"></div>
+        </div>
+        <div id="error-box" role="alert" class="error hidden"></div>
+        <div id="result-panel" class="hidden">
+          <div id="verdict" class="verdict"></div>
+          <div class="metrics" id="metrics"></div>
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="findings">Результат</button
+            ><button class="tab" data-tab="actions">Журнал действий</button
+            ><button class="tab" data-tab="objects">Объекты и треки</button
+            ><button class="tab" data-tab="candidates">Кандидаты</button>
+          </div>
+          <section id="tab-findings">
+            <div id="findings"></div>
+            <details class="card">
+              <summary>Ограничения и замечания</summary>
+              <ul id="warnings"></ul>
+            </details>
+          </section>
+          <section id="tab-actions" class="hidden">
+            <div class="card">
+              <div class="section-heading">
+                <h3>Хронология действий</h3>
+                <span id="action-count"></span>
+              </div>
+              <div id="actions-table" class="table-scroll"></div>
+              <details>
+                <summary>Состояния и наблюдаемость</summary>
+                <pre id="states-json"></pre>
+              </details>
+            </div>
+          </section>
+          <section id="tab-objects" class="hidden">
+            <div class="card">
+              <div class="section-heading">
+                <h3>Обнаружения по кадрам</h3>
+                <span id="object-count"></span>
+              </div>
+              <label
+                >Кадр <input id="frame-slider" type="range" min="0" value="0"
+              /></label>
+              <p id="frame-label"></p>
+              <canvas id="object-canvas"></canvas>
+              <div id="objects-table" class="table-scroll"></div>
+            </div>
+          </section>
+          <section id="tab-candidates" class="hidden">
+            <div class="card">
+              <h3>Две ветки анализа</h3>
+              <p>
+                Проверки в коде и локальная LLM формируют кандидатов независимо.
+                В MVP выполнена только проверка структуры и ссылок.
+              </p>
+              <pre id="candidates-json"></pre>
+            </div>
+          </section>
+        </div>
+      </section>
+      <footer>
+        <span>Forte Guard · Madagascar</span
+        ><span>Локальные модели · Проверяемые доказательства</span>
+      </footer>
+    </main>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

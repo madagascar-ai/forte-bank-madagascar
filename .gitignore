@@ -22,4 +22,9 @@ videos/
 *.sqlite*
 *.log
 Кейс_ForteBank.docx.md
+/tools/prepare_local_review.py
+/tools/analyze_full_video.py
+/tools/run_local_review.py
+/tools/extract_review_frames.swift
+/docs/event_log_architecture.md
 

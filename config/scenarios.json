@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "scenarios": [
+    {"id":"client_cash_deposit","description":"Client arrives; optional visible document presentation; cash transferred to cashier; counting may be observed; cash moved to storage; client departs.","required_capabilities":["cash_transferred","cash_counted"],"note":"Absence of a visible paper document does not prove identification was omitted."},
+    {"id":"client_cash_payout","description":"Cash prepared; the specific payout batch counted subject to applicable exceptions; batch transferred to client.","required_capabilities":["cash_transferred","cash_counted"],"note":"Keep separate batch IDs after splitting or merging. An incomplete clip cannot prove omission."}
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "source": "not_configured",
+  "zones": [],
+  "notes": "Draw zones in the UI, supply zones with an upload, or enable local automatic estimation. Coordinates are normalized [x1,y1,x2,y2]."
+}
