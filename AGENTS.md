@@ -177,7 +177,7 @@ python scripts/check_service.py --url http://127.0.0.1:8001   # сквозная
 | `FORTE_LLM_MODEL`, `FORTE_ZONE_MODEL`, `FORTE_JUDGE_MODEL` | LLM-резонер, vision-модель автозон и судья бенчмарка — по умолчанию одна `gemma4:26b` (одна модель в памяти GPU вместо двух) |
 | `FORTE_LLM_ENABLED`, `FORTE_AUTO_ZONES` | включение ветки LLM и автозон |
 | `FORTE_CASHIER_PRESENCE` | как фиксировать уход кассира: `zone` (по умолчанию, рабочее место пусто N секунд) или `track` (трек виден вне зоны) |
-| `FORTE_WEB_ACCESS`, `FORTE_ALLOWED_CLIENTS` | режим входа в интерфейс (`api_key`, `open`, `trusted_clients`) и список разрешённых IP |
+| `FORTE_WEB_ACCESS`, `FORTE_ALLOWED_CLIENTS` | режим входа в интерфейс (`api_key`, `open`, `trusted_clients`, `guest` — публичный сайт: гость видит только свои проверки) и список разрешённых IP |
 | `FORTE_JOB_TIMEOUT_SEC` | лимит задачи, включая ожидание в очереди (285 с) |
 | `FORTE_BENCHMARK_ENABLED`, `FORTE_BENCHMARK_LABELS`, `FORTE_BENCHMARK_VIDEOS` | бенчмарк: включение, путь или ссылка на разметку, папка видео. Пути у каждого свои, только в своём `.env` |
 

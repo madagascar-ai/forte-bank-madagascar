@@ -221,6 +221,11 @@ p {
   border-radius: 18px;
   margin-bottom: 30px;
 }
+.connection.notice-only label,
+.connection.notice-only input,
+.connection.notice-only button {
+  display: none;
+}
 .connection label {
   font-size: 12px;
   font-weight: 600;

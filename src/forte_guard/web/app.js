@@ -60,6 +60,14 @@ async function api(path, options = {}) {
   }
   return r;
 }
+// Guests have no key form, so the panel shows only the message.
+function notify(message) {
+  $("connection-status").textContent = message;
+  if (S.guest) {
+    $("connection-panel").classList.add("notice-only");
+    show("connection-panel");
+  }
+}
 async function json(path, options) {
   return (await api(path, options)).json();
 }
@@ -151,7 +159,7 @@ $("upload-form").onsubmit = async (e) => {
     const d = await json("/api/v1/analyze", { method: "POST", body });
     await selectJob(d.job_id, file.name);
   } catch (e) {
-    $("connection-status").textContent = e.message;
+    notify(e.message);
   } finally {
     $("analyze-button").disabled = false;
   }
@@ -496,7 +504,12 @@ $("download-json").onclick = () => {
 };
 json("/api/v1/access")
   .then(async (access) => {
-    if (access.authorized) {
+    if (access.guest) {
+      // Guest mode: no key needed; the server shows this browser only its own jobs.
+      S.guest = true;
+      S.connected = true;
+      await history();
+    } else if (access.authorized) {
       S.connected = true;
       await history();
       await benchmarkAvailable();

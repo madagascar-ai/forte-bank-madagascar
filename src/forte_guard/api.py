@@ -31,6 +31,7 @@ from .storage import JobStore, MaintenanceError
 
 logger = logging.getLogger("forte_guard")
 UI_COOKIE = "forte_ui"
+GUEST_COOKIE = "forte_guest"
 JOB_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 FRAME_PATTERN = re.compile(r"^f[0-9]{6}$")
 ARTIFACTS = {
@@ -99,20 +100,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cookie = request.cookies.get(UI_COOKIE, "")
         return ui_allowed(request) and hmac.compare_digest(cookie.encode(), ui_token.encode())
 
+    def guest_signature(guest: str) -> str:
+        return hmac.new(settings.api_key.encode(), b"forte-guard-guest-v1:" + guest.encode(), "sha256").hexdigest()
+
+    def guest_id(request: Request) -> str | None:
+        if settings.web_access != "guest":
+            return None
+        guest, _, signature = request.cookies.get(GUEST_COOKIE, "").partition(".")
+        if JOB_PATTERN.fullmatch(guest) and hmac.compare_digest(signature.encode(), guest_signature(guest).encode()):
+            return guest
+        return None
+
+    def same_origin(request: Request):
+        # SameSite already blocks cross-site use; also reject foreign origins explicitly.
+        origin = request.headers.get("origin")
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and origin:
+            parsed = urlparse(origin)
+            if parsed.scheme not in {"http", "https"} or parsed.netloc != request.headers.get("host"):
+                raise HTTPException(403, "Запрос должен исходить из интерфейса сервиса")
+
     def require_key(request: Request, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
         if x_api_key is None and ui_session(request):
-            # SameSite=Strict already blocks cross-site use; also reject foreign origins explicitly.
-            origin = request.headers.get("origin")
-            if request.method not in {"GET", "HEAD", "OPTIONS"} and origin:
-                parsed = urlparse(origin)
-                if parsed.scheme not in {"http", "https"} or parsed.netloc != request.headers.get("host"):
-                    raise HTTPException(403, "Запрос должен исходить из интерфейса сервиса")
+            same_origin(request)
             return "ui"
         if x_api_key is None and settings.web_access == "trusted_clients" and not ui_allowed(request):
             raise HTTPException(403, "Доступ с этого устройства не разрешён")
         if x_api_key is None or not hmac.compare_digest(x_api_key.encode(), settings.api_key.encode()):
             raise HTTPException(401, "Неверный или отсутствующий X-API-Key")
         return "key"
+
+    def require_caller(request: Request, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+        """Like require_key, but a keyless guest browser passes too, as "guest:<id>"."""
+        if x_api_key is None and (guest := guest_id(request)):
+            same_origin(request)
+            return "guest:" + guest
+        return require_key(request, x_api_key)
+
+    def owner_file(job_id: str) -> Path:
+        return store.folder(job_id) / "guest_owner"
+
+    def visible(auth: str, job_id: str) -> bool:
+        # A guest sees only jobs uploaded from their own browser.
+        if not auth.startswith("guest:"):
+            return True
+        path = owner_file(job_id)
+        return path.is_file() and path.read_text() == auth.removeprefix("guest:")
+
+    def check_owner(auth: str, job_id: str):
+        if not visible(auth, job_id):
+            # 404 rather than 403, so a guest cannot probe which job ids exist.
+            raise HTTPException(404, "Задача не найдена")
 
     # Generous safety limits for keyless browser uploads only; X-API-Key (jury) uploads bypass them.
     ui_jobs: set[str] = set()
@@ -136,7 +173,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/access")
     def access(request: Request):
-        return {"mode": settings.web_access, "authorized": ui_session(request)}
+        report = {"mode": settings.web_access, "authorized": ui_session(request)}
+        if settings.web_access == "guest":
+            report["guest"] = guest_id(request) is not None
+        return report
 
     def get_job(job_id):
         if not JOB_PATTERN.fullmatch(job_id):
@@ -205,7 +245,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def analyze(
         file: Annotated[UploadFile, File()],
         zones: Annotated[str | None, Form()] = None,
-        auth: str = Depends(require_key),
+        auth: str = Depends(require_caller),
     ):
         if store.maintenance():
             raise HTTPException(
@@ -213,7 +253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Сервис обновляется. Повторите загрузку через несколько секунд.",
                 headers={"Retry-After": "10"},
             )
-        if auth == "ui":
+        if auth != "key":
             check_ui_limits()
         filename = Path((file.filename or "video.mov").replace("\\", "/")).name
         if Path(filename).suffix.lower() not in {".mov", ".mp4"}:
@@ -242,6 +282,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     output.write(chunk)
             if size == 0:
                 raise HTTPException(422, "Загружен пустой файл")
+            if auth.startswith("guest:"):
+                owner_file(job_id).write_text(auth.removeprefix("guest:"))
             try:
                 store.create(job_id, filename, profile.model_dump() if profile else None)
             except MaintenanceError:
@@ -250,7 +292,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "Сервис обновляется. Повторите загрузку через несколько секунд.",
                     headers={"Retry-After": "10"},
                 ) from None
-            if auth == "ui":
+            if auth != "key":
                 ui_jobs.add(job_id)
                 ui_uploads.append(time.time())
             executor.submit(worker, job_id)
@@ -332,13 +374,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "maintenance": store.maintenance(),
         }
 
-    @app.get("/api/v1/jobs", dependencies=[Depends(require_key)])
-    def jobs():
-        return {"jobs": store.list()}
+    @app.get("/api/v1/jobs")
+    def jobs(auth: str = Depends(require_caller)):
+        return {"jobs": [item for item in store.list() if visible(auth, item["job_id"])]}
 
-    @app.get("/api/v1/jobs/{job_id}", dependencies=[Depends(require_key)])
-    def status(job_id: str):
+    @app.get("/api/v1/jobs/{job_id}")
+    def status(job_id: str, auth: str = Depends(require_caller)):
         job = get_job(job_id)
+        check_owner(auth, job_id)
         if job["status"] == "done":
             return JSONResponse(json.loads((store.folder(job_id) / "result.json").read_text()))
         return {
@@ -349,9 +392,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "error": job["error"],
         }
 
-    @app.get("/api/v1/jobs/{job_id}/artifacts/{artifact}", dependencies=[Depends(require_key)])
-    def artifact(job_id: str, artifact: str):
+    @app.get("/api/v1/jobs/{job_id}/artifacts/{artifact}")
+    def artifact(job_id: str, artifact: str, auth: str = Depends(require_caller)):
         get_job(job_id)
+        check_owner(auth, job_id)
         if artifact not in ARTIFACTS:
             raise HTTPException(404, "Артефакт не найден")
         path = store.folder(job_id) / f"{artifact}.json"
@@ -362,9 +406,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             data = [{key: value for key, value in item.items() if key != "image_path"} for item in data]
         return JSONResponse(data)
 
-    @app.get("/api/v1/jobs/{job_id}/frames/{frame_id}", dependencies=[Depends(require_key)])
-    def frame(job_id: str, frame_id: str):
+    @app.get("/api/v1/jobs/{job_id}/frames/{frame_id}")
+    def frame(job_id: str, frame_id: str, auth: str = Depends(require_caller)):
         get_job(job_id)
+        check_owner(auth, job_id)
         if not FRAME_PATTERN.fullmatch(frame_id):
             raise HTTPException(404, "Кадр не найден")
         path = store.folder(job_id) / "frames" / f"{frame_id}.jpg"
@@ -372,9 +417,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "Кадр не найден")
         return FileResponse(path, media_type="image/jpeg")
 
-    @app.get("/api/v1/jobs/{job_id}/video", dependencies=[Depends(require_key)])
-    def video(job_id: str):
+    @app.get("/api/v1/jobs/{job_id}/video")
+    def video(job_id: str, auth: str = Depends(require_caller)):
         get_job(job_id)
+        check_owner(auth, job_id)
         return FileResponse(store.folder(job_id) / "input.mov", media_type="video/quicktime")
 
     @app.get("/api/v1/config", dependencies=[Depends(require_key)])
@@ -418,6 +464,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 samesite="strict",
                 secure=request.url.scheme == "https",
                 max_age=7 * 24 * 3600,
+            )
+        if settings.web_access == "guest" and guest_id(request) is None:
+            guest = uuid.uuid4().hex
+            response.set_cookie(
+                GUEST_COOKIE,
+                f"{guest}.{guest_signature(guest)}",
+                httponly=True,
+                # Lax keeps the guest's history when they arrive by a link; cross-site POSTs are still
+                # dropped by the browser and by same_origin().
+                samesite="lax",
+                secure=request.url.scheme == "https",
+                max_age=30 * 24 * 3600,
             )
         return response
 

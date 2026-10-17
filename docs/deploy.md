@@ -37,6 +37,8 @@ VPS только принимает HTTPS и пересылает запросы
 
 Новые веса не приезжают через git: положить файл в `shared/models/` и указать его в `shared/.env` (`FORTE_MODEL_PATH`), затем `systemctl --user restart forte-guard`.
 
+Сайт публичный, поэтому в `shared/.env` задайте `FORTE_WEB_ACCESS=guest`: посетители загружают видео без ключа и видят только свои проверки, а история (включая видео жюри), бенчмарк и конфигурация остаются за `X-API-Key`. Режим `open` здесь не используйте — он открывает всю историю любому посетителю.
+
 ## VPS
 
 `~/forte-proxy/` — `deploy/vps/docker-compose.yml` и `Caddyfile`: контейнер Tailscale (порты 80/443) и Caddy в его сети, сертификат Let's Encrypt для `madagascar-ai.team` и `www`. DNS: записи `A @` и `A www` → `77.42.123.206`.
