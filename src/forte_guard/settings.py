@@ -56,10 +56,10 @@ class Settings:
     # "track": absence only when a cashier track is seen away; "zone": also when the workstation stays empty.
     cashier_presence: str = field(default_factory=lambda: os.getenv("FORTE_CASHIER_PRESENCE", "zone"))
     ollama_url: str = field(default_factory=lambda: os.getenv("FORTE_OLLAMA_URL", "http://127.0.0.1:11434"))
-    llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma3:4b"))
+    llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma4:26b"))
     # The zone fallback sends a frame, so it needs a vision-capable model; text-only LLMs cannot do it.
     zone_model: str = field(
-        default_factory=lambda: os.getenv("FORTE_ZONE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma3:4b")
+        default_factory=lambda: os.getenv("FORTE_ZONE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma4:26b")
     )
     # Limits for keyless browser uploads (0 disables); API-key uploads are never limited.
     ui_max_queued: int = field(default_factory=lambda: int(os.getenv("FORTE_UI_MAX_QUEUED", "10")))
@@ -74,7 +74,7 @@ class Settings:
     )
     benchmark_tolerance_sec: float = 3.0
     judge_model: str = field(
-        default_factory=lambda: os.getenv("FORTE_JUDGE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma3:4b")
+        default_factory=lambda: os.getenv("FORTE_JUDGE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma4:26b")
     )
     job_timeout_sec: float = field(default_factory=lambda: float(os.getenv("FORTE_JOB_TIMEOUT_SEC", "285")))
     max_upload_mb: int = 256

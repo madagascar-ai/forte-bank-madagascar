@@ -21,7 +21,7 @@ source .venv/bin/activate
 pip install -e '.[vision,dev]'
 python scripts/setup.py
 python scripts/prepare_models.py
-ollama pull gemma3:4b
+ollama pull gemma4:26b
 forte-guard serve
 ```
 
@@ -29,7 +29,7 @@ forte-guard serve
 
 Подготовка моделей требует интернета один раз. По умолчанию `prepare_models.py` скачивает дообученный детектор команды `models/detector-v2.pt` из приватного релиза `detector-v2` (нужен `gh auth login`); для YOLO-World или YOLOE-26 — `--detector world|yoloe`, веса сохраняются с подготовленным словарём; при обработке видео веса не скачиваются и автоустановка пакетов отключена. Ollama вызывается только через loopback или внутренний Docker-сервис `ollama`. Телеметрия Ultralytics отключена. Видео, кадры и логи облачным AI не отправляются.
 
-LLM можно вынести на GPU-машину команды: `FORTE_OLLAMA_URL=http://<IP>:11434`. Допускаются только loopback, Docker-сервис `ollama` и литеральные частные или Tailscale-адреса (`10.*`, `192.168.*`, `100.64.0.0/10`); имена хостов отклоняются, чтобы DNS не увёл запросы во внешний сервис. Текстовой модели вроде `qwen3:30b` нужна отдельная vision-модель для запасного определения зон: `FORTE_ZONE_MODEL=gemma4:26b`. Запросы идут с `think: false`.
+LLM можно вынести на GPU-машину команды: `FORTE_OLLAMA_URL=http://<IP>:11434`. Допускаются только loopback, Docker-сервис `ollama` и литеральные частные или Tailscale-адреса (`10.*`, `192.168.*`, `100.64.0.0/10`); имена хостов отклоняются, чтобы DNS не увёл запросы во внешний сервис. По умолчанию одна модель `gemma4:26b` (понимает изображения) работает и резонером, и для зон, и судьёй бенчмарка: на GPU держится одна модель вместо двух. Если поставить текстовую модель вроде `qwen3:30b`, для зон нужна отдельная vision-модель: `FORTE_ZONE_MODEL=gemma4:26b`. Запросы идут с `think: false`.
 
 Детектор по умолчанию — `detector-v2` (YOLO26m, обучен на 960 px по черновой разметке для 33 обучающих роликов, разметка не проверена людьми; рук и состояний открыт/закрыт нет; сервис запускает его на 640 px). На бенчмарке 42 видео с `FORTE_CASHIER_PRESENCE=zone`: найдено 9 из 22 нарушений, 5 ложных срабатываний, средняя ошибка таймкода 5 с (`detector-v1`: 8 из 22, 4 ложных, 18 с). Ролики пересекаются с обучением, поэтому цифры завышены. YOLO-World с текстовыми классами из `config/detector.json` остаётся вариантом: `FORTE_DETECTOR=world`, `FORTE_MODEL_PATH=models/cashier-world.pt`. Можно включить YOLOE-26 (`yoloe-26s-seg`): `FORTE_DETECTOR=yoloe`, `FORTE_MODEL_PATH=models/cashier-yoloe26.pt` и `python scripts/prepare_models.py --detector yoloe`. По умолчанию он выключен, пока бенчмарк не покажет пользу; какой из них точнее на ваших видео, не измерено. Дообучение детектора — [docs/training.md](docs/training.md). Настройка классов, зон и обучение на локальной разметке — следующая работа команды.
 
@@ -175,7 +175,7 @@ python scripts/check_service.py --video /path/to/video.mov
 ```bash
 docker compose build
 docker compose up -d
-docker compose exec ollama ollama pull gemma3:4b
+docker compose exec ollama ollama pull gemma4:26b
 ```
 
 Модели Ollama хранятся в отдельном томе, YOLO — в `models/`. После подготовки обработка не требует интернета. Compose по умолчанию публикует интерфейс только на `127.0.0.1:8000`. На Linux используется CPU; для NVIDIA настройте PyTorch/CUDA и GPU-доступ контейнера под свою машину.
