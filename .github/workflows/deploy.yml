@@ -71,6 +71,29 @@ jobs:
             -e "ssh -i ~/.ssh/gpu -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
             ./ "$GPU:forte-guard/releases/$SHA/"
 
+      - name: Server settings from GitHub (FORTE_* secrets and variables)
+        if: steps.ready.outputs.ok == 'true'
+        env:
+          GH_VARS: ${{ toJSON(vars) }}
+          GH_SECRETS: ${{ toJSON(secrets) }}
+        run: |
+          # Only FORTE_* names reach the server; deploy keys and the Tailscale key never do.
+          # Secrets win over variables with the same name. Values are masked; only names are printed.
+          python3 - <<'PY' > forte.env
+          import json, os, re, sys
+          merged = {}
+          for source in ("GH_VARS", "GH_SECRETS"):
+              for name, value in json.loads(os.environ.get(source) or "{}").items():
+                  if re.fullmatch(r"FORTE_[A-Z0-9_]+", name):
+                      merged[name] = str(value).strip()
+          for name in sorted(merged):
+              print(f"{name}={merged[name]}")
+          print("from GitHub: " + (", ".join(sorted(merged)) or "nothing"), file=sys.stderr)
+          PY
+          ssh -i ~/.ssh/gpu -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$GPU" \
+            "umask 077 && cat > forte-guard/shared/.env.github" < forte.env
+          rm -f forte.env
+
       - name: Activate on the GPU machine (drain, switch, verify, roll back on failure)
         if: steps.ready.outputs.ok == 'true'
         run: |

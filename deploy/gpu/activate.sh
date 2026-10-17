@@ -52,6 +52,8 @@ switch_to() {
 
 healthy() {  # The new code answers with its own SHA and every readiness check passes.
   local expected="$1"
+  URL="http://$(env_value FORTE_HOST):$(env_value FORTE_PORT)"  # settings may have just changed
+  KEY="$(env_value FORTE_API_KEY)"
   for _ in $(seq 1 45); do
     if curl -fsS -m 3 "$URL/health" 2>/dev/null | grep -q "\"release\":\"$expected\""; then
       curl -fsS -m 20 -H "X-API-Key: $KEY" "$URL/api/v1/readiness" >/dev/null && return 0
@@ -70,6 +72,17 @@ for _ in $(seq 1 48); do
   sleep 5
 done
 
+# Settings managed in GitHub (FORTE_* secrets and variables) arrive as shared/.env.github.
+ENV="$BASE/shared/.env"
+OVERRIDES="$BASE/shared/.env.github"
+ENV_CHANGED=""
+if [ -f "$OVERRIDES" ]; then
+  cp -p "$ENV" "$ENV.previous"
+  log "$(python3 "$NEW/deploy/gpu/merge_env.py" "$ENV" "$OVERRIDES")"
+  rm -f "$OVERRIDES"
+  ENV_CHANGED=1
+fi
+
 log "switching to $SHA (previous: $(basename "${PREV:-none}"))"
 switch_to "$NEW"
 if healthy "$SHA"; then
@@ -79,6 +92,10 @@ if healthy "$SHA"; then
 fi
 
 log "release $SHA failed health/readiness; rolling back"
+if [ -n "$ENV_CHANGED" ]; then
+  cp -p "$ENV.previous" "$ENV"
+  log "restored the previous server settings"
+fi
 if [ -n "$PREV" ] && [ "$PREV" != "$NEW" ]; then
   switch_to "$PREV"
   healthy "$(cat "$PREV/REVISION" 2>/dev/null || basename "$PREV")" && log "rolled back to $(basename "$PREV")"
