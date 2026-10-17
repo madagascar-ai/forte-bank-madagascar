@@ -6,18 +6,16 @@ const S = {
   job: null,
   file: null,
   result: null,
-  zones: [],
   generation: 0,
   frameGeneration: 0,
   objects: null,
   videoURL: null,
-  previewURL: null,
 };
 const stageNames = {
   queued: "Видео в очереди",
   frames: "Подготовка кадров",
-  zones: "Определение зон",
   objects: "Объекты и треки",
+  zones: "Определение зон",
   actions: "Журнал действий",
   candidates: "Правила + LLM",
   validation: "Сборка результата",
@@ -31,13 +29,6 @@ const actionNames = {
   device_used_observed: "Взаимодействие с устройством",
   document_presented: "Действие с документом",
   cash_entered_storage_area: "Перемещение денег в зону хранения",
-};
-const colors = {
-  cashier_area: "#a82e64",
-  client_area: "#3f8c92",
-  counter_area: "#dd9f42",
-  storage_area: "#7662be",
-  exit_area: "#5d8d46",
 };
 function el(tag, text, cls) {
   const n = document.createElement(tag);
@@ -127,22 +118,7 @@ $("new-job").onclick = () => {
 function chooseFile(file) {
   if (!file) return;
   S.file = file;
-  S.zones = [];
   $("file-title").textContent = file.name;
-  if (S.previewURL) URL.revokeObjectURL(S.previewURL);
-  S.previewURL = URL.createObjectURL(file);
-  const v = $("preview-video");
-  v.src = S.previewURL;
-  v.onloadeddata = () => {
-    const c = $("zone-canvas");
-    c.width = Math.min(640, v.videoWidth);
-    c.height = Math.round((c.width * v.videoHeight) / v.videoWidth);
-    show("zone-panel");
-    drawZones();
-  };
-  v.onerror = () => show("zone-panel", false);
-  v.load();
-  $("zone-count").textContent = "Автоматическое определение";
 }
 $("video-file").onchange = (e) => chooseFile(e.target.files[0]);
 ["dragenter", "dragover", "dragleave", "drop"].forEach((name) =>
@@ -155,80 +131,6 @@ $("video-file").onchange = (e) => chooseFile(e.target.files[0]);
     if (name === "drop") chooseFile(e.dataTransfer.files[0]);
   }),
 );
-let dragging = null;
-function point(e) {
-  const r = $("zone-canvas").getBoundingClientRect();
-  return [
-    Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
-    Math.max(0, Math.min(1, (e.clientY - r.top) / r.height)),
-  ];
-}
-function rectangle(a, b) {
-  return {
-    x1: Math.min(a[0], b[0]),
-    y1: Math.min(a[1], b[1]),
-    x2: Math.max(a[0], b[0]),
-    y2: Math.max(a[1], b[1]),
-  };
-}
-function drawZones(preview) {
-  const c = $("zone-canvas"),
-    ctx = c.getContext("2d"),
-    v = $("preview-video");
-  if (v.readyState < 2) return;
-  ctx.drawImage(v, 0, 0, c.width, c.height);
-  for (const z of [...S.zones, ...(preview ? [preview] : [])]) {
-    const b = z.box;
-    ctx.strokeStyle = colors[z.name];
-    ctx.fillStyle = colors[z.name] + "26";
-    ctx.lineWidth = 2;
-    ctx.fillRect(
-      b.x1 * c.width,
-      b.y1 * c.height,
-      (b.x2 - b.x1) * c.width,
-      (b.y2 - b.y1) * c.height,
-    );
-    ctx.strokeRect(
-      b.x1 * c.width,
-      b.y1 * c.height,
-      (b.x2 - b.x1) * c.width,
-      (b.y2 - b.y1) * c.height,
-    );
-    ctx.fillStyle = colors[z.name];
-    ctx.font = "12px sans-serif";
-    ctx.fillText(z.name, b.x1 * c.width + 4, b.y1 * c.height + 15);
-  }
-}
-$("zone-canvas").onpointerdown = (e) => {
-  dragging = point(e);
-  $("zone-canvas").setPointerCapture(e.pointerId);
-};
-$("zone-canvas").onpointermove = (e) => {
-  if (dragging)
-    drawZones({
-      name: $("zone-type").value,
-      box: rectangle(dragging, point(e)),
-    });
-};
-$("zone-canvas").onpointerup = (e) => {
-  if (!dragging) return;
-  const name = $("zone-type").value,
-    box = rectangle(dragging, point(e));
-  dragging = null;
-  if (box.x2 - box.x1 > 0.02 && box.y2 - box.y1 > 0.02) {
-    S.zones = S.zones.filter((z) => z.name !== name);
-    S.zones.push({ name, box });
-  }
-  $("zone-count").textContent = S.zones.length
-    ? "Задано зон: " + S.zones.length
-    : "Автоматическое определение";
-  drawZones();
-};
-$("clear-zones").onclick = () => {
-  S.zones = [];
-  $("zone-count").textContent = "Автоматическое определение";
-  drawZones();
-};
 $("upload-form").onsubmit = async (e) => {
   e.preventDefault();
   if (!S.connected) S.key = $("api-key").value.trim();
@@ -244,8 +146,6 @@ $("upload-form").onsubmit = async (e) => {
   }
   const body = new FormData();
   body.append("file", file);
-  if (S.zones.length)
-    body.append("zones", JSON.stringify({ source: "manual", zones: S.zones }));
   $("analyze-button").disabled = true;
   try {
     const d = await json("/api/v1/analyze", { method: "POST", body });

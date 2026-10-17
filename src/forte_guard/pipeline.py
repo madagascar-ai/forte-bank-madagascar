@@ -7,8 +7,9 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .contracts import AnalysisResult, Evidence, Frame, Violation, ZoneProfile
+from .contracts import AnalysisResult, Evidence, Frame, ObjectJournal, Violation, ZoneProfile
 from .journal.builder import build_journal
+from .journal.zones import CORE_ZONES, estimate_zones
 from .reasoning.catalog import load_catalog
 from .reasoning.llm import auto_zones, llm_candidates
 from .reasoning.rules import rule_candidates
@@ -35,6 +36,12 @@ def _evidence(candidate, frame_map: dict[str, Frame]) -> list[Evidence]:
         )
         for frame in sorted(selected.values(), key=lambda f: f.timestamp_sec)
     ]
+
+
+def _busiest_frame(frames: list[Frame], objects: ObjectJournal) -> Frame:
+    # The vision fallback sees the frame with the most people, where the layout is clearest.
+    counts = {f.frame_id: sum(d.label in {"person", "cashier", "client"} for d in f.detections) for f in objects.frames}
+    return max(frames, key=lambda frame: counts.get(frame.frame_id, 0))
 
 
 def run_pipeline(
@@ -83,22 +90,32 @@ def run_pipeline(
     if zones is None:
         raw_profile = json.loads((settings.config_dir / "zones.json").read_text())
         zones = ZoneProfile.model_validate({key: raw_profile[key] for key in ("source", "zones")})
-    if not zones.zones and settings.auto_zones and settings.llm_enabled and replay is None:
-        progress("zones", 0.12)
-        started = time.monotonic()
-        try:
-            zones = auto_zones(settings, frames[0], deadline)
-        except Exception as exc:
-            # Do not print model content or frames. Surface a clear degraded-mode warning.
-            warnings.append(f"Автозоны недоступны ({type(exc).__name__}); задайте зоны вручную.")
-        timings["zones"] = time.monotonic() - started
-    write_json(output / "zones.json", zones)
-    progress("objects", 0.16)
+    progress("objects", 0.12)
     started = time.monotonic()
     detector = ReplayDetector(replay) if replay else YoloTracker(settings)
-    objects = detector.run(frames, deadline, lambda value: progress("objects", 0.16 + 0.46 * value))
+    objects = detector.run(frames, deadline, lambda value: progress("objects", 0.12 + 0.48 * value))
     write_json(output / "object_journal.json", objects)
     timings["objects"] = time.monotonic() - started
+    if not zones.zones and settings.auto_zones:
+        progress("zones", 0.6)
+        started = time.monotonic()
+        # Zones come from where people stay and where items rest; nobody has to draw them.
+        zones, notes = estimate_zones(objects)
+        warnings.extend(notes)
+        missing = CORE_ZONES - {zone.name for zone in zones.zones}
+        if missing and settings.llm_enabled and replay is None:
+            try:
+                guess = auto_zones(settings, _busiest_frame(frames, objects), deadline)
+                known = {zone.name for zone in zones.zones}
+                extra = [zone for zone in guess.zones if zone.name not in known]
+                if extra:
+                    source = "auto_tracks+vision" if zones.zones else guess.source
+                    zones = ZoneProfile(source=source, zones=[*zones.zones, *extra])
+            except Exception as exc:
+                # Do not print model content or frames. Surface a clear degraded-mode warning.
+                warnings.append(f"Уточнение зон vision-моделью недоступно ({type(exc).__name__}).")
+        timings["zones"] = time.monotonic() - started
+    write_json(output / "zones.json", zones)
     deadline.remaining()
     progress("actions", 0.64)
     started = time.monotonic()

@@ -97,7 +97,7 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
     if not profile.zones:
         journal.warnings.append("Зоны не определены: пространственные проверки ограничены.")
     elif profile.source.startswith("auto"):
-        journal.warnings.append("Зоны оценены локальной моделью; проверьте их расположение.")
+        journal.warnings.append("Зоны определены автоматически; проверьте их расположение.")
     journal.unsupported_actions = [
         "cash_counted",
         "authenticity_verified",

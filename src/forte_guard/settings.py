@@ -52,7 +52,7 @@ class Settings:
     auto_zones: bool = field(default_factory=lambda: _bool("FORTE_AUTO_ZONES", True))
     ollama_url: str = field(default_factory=lambda: os.getenv("FORTE_OLLAMA_URL", "http://127.0.0.1:11434"))
     llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma3:4b"))
-    # Automatic zones send a frame, so they need a vision-capable model; text-only LLMs cannot do it.
+    # The zone fallback sends a frame, so it needs a vision-capable model; text-only LLMs cannot do it.
     zone_model: str = field(
         default_factory=lambda: os.getenv("FORTE_ZONE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma3:4b")
     )

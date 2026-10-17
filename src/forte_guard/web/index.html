@@ -58,33 +58,6 @@
               type="file"
               accept=".mov,.mp4,video/quicktime,video/mp4"
           /></label>
-          <div id="zone-panel" class="card hidden">
-            <div class="section-heading">
-              <div>
-                <h3>Зоны на записи</h3>
-                <p>
-                  При необходимости обозначьте рабочие области прямоугольниками.
-                </p>
-              </div>
-              <button id="clear-zones" type="button" class="text-button">
-                Очистить
-              </button>
-            </div>
-            <div class="zone-toolbar">
-              <label
-                >Зона
-                <select id="zone-type">
-                  <option value="cashier_area">Рабочее место кассира</option>
-                  <option value="client_area">Клиентская сторона</option>
-                  <option value="counter_area">Поверхность стола</option>
-                  <option value="storage_area">Хранилище</option>
-                  <option value="exit_area">Зона выхода</option>
-                </select></label
-              ><span id="zone-count">Автоматическое определение</span>
-            </div>
-            <div class="canvas-wrap"><canvas id="zone-canvas"></canvas></div>
-            <video id="preview-video" muted playsinline class="hidden"></video>
-          </div>
           <div class="submit-row">
             <p>Результаты предназначены для последующей проверки человеком.</p>
             <button id="analyze-button" class="primary" type="submit">
