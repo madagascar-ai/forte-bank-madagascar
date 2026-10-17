@@ -36,6 +36,8 @@ def main():
             create_app(settings),
             host=args.host or os.getenv("FORTE_HOST", "127.0.0.1"),
             port=args.port or int(os.getenv("FORTE_PORT", "8000")),
+            # IP restrictions must use the socket peer, never a user-supplied forwarded header.
+            proxy_headers=False,
         )
     else:
         from .pipeline import run_pipeline

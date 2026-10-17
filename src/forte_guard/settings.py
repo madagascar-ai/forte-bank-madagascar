@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -39,6 +40,11 @@ class Settings:
     detection_confidence: float = 0.20
     image_size: int = 640
     inference_batch: int = 8
+    allowed_clients: list[str] = field(
+        default_factory=lambda: [
+            value.strip() for value in os.getenv("FORTE_ALLOWED_CLIENTS", "").split(",") if value.strip()
+        ]
+    )
 
     def validate(self) -> None:
         if not self.api_key or self.api_key == "change-this-local-key":
@@ -52,3 +58,5 @@ class Settings:
             raise ValueError("Ollama must be local: localhost, loopback, or Docker service 'ollama'")
         if self.job_timeout_sec <= 0:
             raise ValueError("Job timeout must be positive")
+        # Exact addresses only: a typo must never expand access to an entire subnet.
+        self.allowed_clients = [str(ip_address(value)) for value in self.allowed_clients]

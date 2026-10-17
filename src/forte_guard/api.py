@@ -9,10 +9,11 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -60,6 +61,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.store = store
     app.state.settings = settings
     app.state.executor = executor
+
+    if settings.allowed_clients:
+        allowed = {ip_address(value) for value in ["127.0.0.1", "::1", *settings.allowed_clients]}
+
+        @app.middleware("http")
+        async def restrict_clients(request: Request, call_next):
+            try:
+                permitted = request.client is not None and ip_address(request.client.host) in allowed
+            except ValueError:
+                permitted = False
+            if not permitted:
+                return JSONResponse({"detail": "Доступ с этого устройства не разрешён"}, status_code=403)
+            return await call_next(request)
 
     def require_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
         if x_api_key is None or not hmac.compare_digest(x_api_key.encode(), settings.api_key.encode()):
@@ -222,6 +236,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "llm_model": settings.llm_model,
             "llm_enabled": settings.llm_enabled,
             "auto_zones": settings.auto_zones,
+            "client_access_restricted": bool(settings.allowed_clients),
             "verification_mode": "structural_only",
             "max_upload_mb": settings.max_upload_mb,
             "job_timeout_sec": settings.job_timeout_sec,
