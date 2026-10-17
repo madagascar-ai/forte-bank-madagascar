@@ -26,6 +26,12 @@ COUNT_PRESENCE_RATIO = 0.9
 # Objects that should not stay at the cashier's workstation (or only while she is there).
 WORKSTATION_ITEMS = ("personal_item", "phone", "cash_bag", "stamp", "folder")
 WORKSTATION_ZONES = {"cashier_area", "counter_area"}
+# A client handing something across the counter (phone with a digital ID, or a paper ID the
+# detector mislabels as personal_item) should not immediately count as left at the workstation.
+# The hand-contact check below only fires on detectors with a "hand" class (detector-v1 has none,
+# so it's otherwise dead); this zone-trajectory fallback covers client-area objects crossing over.
+CLIENT_ITEM_LABELS = {"phone", "personal_item"}
+CLIENT_HANDOFF_GRACE_SEC = 5.0
 # Presence mode "zone": an empty workstation counts as an absence only after this wait. Vanishing in the
 # middle of the area is more likely bending down or occlusion than leaving, so it waits longer.
 ABSENT_MIN_SEC = 3.0
@@ -253,6 +259,7 @@ def build_journal(
     object_states = {}
     emitted_device_contacts = set()
     last_observed = {}
+    client_zone_seen: dict[str, float] = {}
     first_seen: dict[str, float] = {}
     session_started: dict[str, float] = {}
     session_order: list[str] = []
@@ -326,6 +333,9 @@ def build_journal(
         people = [d for d in frame.detections if d.label in {"person", "cashier", "client"}]
         hands = [d for d in frame.detections if d.label == "hand"]
         money_items = [d for d in frame.detections if d.label == "money"]
+        for item in frame.detections:
+            if item.label in CLIENT_ITEM_LABELS and zone_of(item, profile) == "client_area":
+                client_zone_seen[item.track_id] = frame.timestamp_sec
         visible = {p.track_id: p for p in people}
         observed_ids = {item.track_id for item in frame.detections}
         for _key, previous in list(open_states.items()):
@@ -410,8 +420,16 @@ def build_journal(
             for item in frame.detections:
                 if item.label != label or zone_of(item, profile) not in WORKSTATION_ZONES:
                     continue
-                if label == "phone" and roles.get(_contact(item, hands, people) or "") == "client":
-                    continue  # a client may show a digital ID on the phone (p. 19.1, p. 31.1)
+                if label in CLIENT_ITEM_LABELS:
+                    hand_owner = roles.get(_contact(item, hands, people) or "")
+                    last_client = client_zone_seen.get(item.track_id)
+                    recently_client = (
+                        last_client is not None and frame.timestamp_sec - last_client <= CLIENT_HANDOFF_GRACE_SEC
+                    )
+                    if hand_owner == "client" or recently_client:
+                        # a client may show a digital ID on the phone (p. 19.1, p. 31.1), or hand
+                        # over a paper document the detector mislabels as a personal item
+                        continue
                 found.append(item.track_id)
             state(f"{label}_at_workstation", True if found else None, frame)
 

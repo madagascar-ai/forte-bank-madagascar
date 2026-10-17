@@ -180,3 +180,28 @@ def test_two_simultaneous_clients_attribute_documents_to_the_right_session():
     }
     assert presented.get("doc_a") is not None and presented.get("doc_b") is not None
     assert presented["doc_a"] != presented["doc_b"]
+
+
+def _workstation_states(journal, label):
+    return [state for state in journal.states if state.name == f"{label}_at_workstation"]
+
+
+def test_personal_item_handed_across_counter_is_not_flagged_as_left_behind():
+    # The detector sometimes mislabels a client's ID card as "personal_item". It should not be
+    # reported as a personal item left at the workstation right after crossing from client_area.
+    in_client_area = [0.7, 0.3, 0.75, 0.35]
+    in_cashier_area = [0.1, 0.3, 0.15, 0.35]
+    frames = [[CLIENT, ("p1", "personal_item", in_client_area if i < 10 else in_cashier_area)] for i in range(25)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    assert not any(state.value is True for state in _workstation_states(journal, "personal_item"))
+
+
+def test_personal_item_left_at_workstation_without_a_handoff_is_still_flagged():
+    # A jacket sitting at the cashier's own area the whole time, never seen on the client side,
+    # is a genuine violation and must still be reported.
+    in_cashier_area = [0.1, 0.3, 0.15, 0.35]
+    frames = [[CLIENT, ("p1", "personal_item", in_cashier_area)] for _ in range(25)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    assert any(state.value is True for state in _workstation_states(journal, "personal_item"))
