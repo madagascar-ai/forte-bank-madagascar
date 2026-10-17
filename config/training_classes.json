@@ -9,7 +9,7 @@
     {"name": "folder", "prompts": ["document folder"], "description": "document folder or file"},
     {"name": "safe_key", "prompts": ["key in a lock"], "description": "key, especially a key inserted in the safe lock"},
     {"name": "personal_item", "prompts": ["jacket", "handbag", "coffee cup", ""], "description": "personal belongings at the cashier workplace: jacket, bag, cup or glass; not clothes worn by a person"},
-    {"name": "door", "prompts": ["door"], "description": "door of the cash room, whole door whether open or closed"},
+    {"name": "door", "prompts": ["door"], "description": "door of the cash room: exactly one box per door covering the whole door leaf, whether open or closed; never separate boxes for glass panels, frames or reflections"},
     {"name": "safe", "prompts": ["metal safe"], "description": "safe, whole safe whether open or closed"},
     {"name": "laptop", "prompts": ["laptop", "personal computer"], "description": "laptop or computer, whether on or off"},
     {"name": "currency_detector", "prompts": ["counterfeit banknote detector"], "description": "banknote authenticity / counterfeit detector device, separate from the counting machine"}
