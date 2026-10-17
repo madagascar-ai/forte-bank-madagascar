@@ -72,7 +72,7 @@ async function json(path, options) {
   return (await api(path, options)).json();
 }
 async function history() {
-  if (!S.connected) return;
+  if (!S.connected || S.guest) return;
   const d = await json("/api/v1/jobs");
   $("history").replaceChildren(
     ...d.jobs.map((j) => {
@@ -505,10 +505,10 @@ $("download-json").onclick = () => {
 json("/api/v1/access")
   .then(async (access) => {
     if (access.guest) {
-      // Guest mode: no key needed; the server shows this browser only its own jobs.
+      // Public site (guest mode): no key and no history list; the shared queue is for the team copy.
       S.guest = true;
       S.connected = true;
-      await history();
+      show("history-section", false);
     } else if (access.authorized) {
       S.connected = true;
       await history();
