@@ -113,13 +113,6 @@ a {
   border-radius: 99px;
   background: rgba(255, 255, 255, 0.18);
 }
-.brand small {
-  flex-basis: 100%;
-  font-size: 9px;
-  letter-spacing: 2.4px;
-  margin-top: 8px;
-  color: rgba(255, 255, 255, 0.72);
-}
 .sidebar-label {
   font-size: 10px;
   font-weight: 700;
