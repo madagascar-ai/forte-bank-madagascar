@@ -273,32 +273,6 @@ p {
   border-radius: 28px;
   padding: 40px 44px 44px;
 }
-.hero::before,
-.hero::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  border: 30px solid var(--cyan);
-  pointer-events: none;
-}
-.hero::before {
-  width: 220px;
-  height: 90px;
-  top: -50px;
-  left: -60px;
-  border-radius: 0 0 80px 0;
-  border-top: 0;
-  border-left: 0;
-}
-.hero::after {
-  width: 240px;
-  height: 110px;
-  bottom: -40px;
-  right: -40px;
-  border-radius: 80px 0 0 0;
-  border-bottom: 0;
-  border-right: 0;
-}
 .hero h2 {
   color: white;
   font-size: 30px;
@@ -762,9 +736,6 @@ footer {
   }
   .hero h2 {
     font-size: 24px;
-  }
-  .hero::after {
-    display: none;
   }
   .submit-row {
     align-items: stretch;

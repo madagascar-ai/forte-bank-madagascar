@@ -484,16 +484,13 @@ fetch("/health")
   .then((r) => r.json())
   .then((d) => {
     const model = detectorLabel(d.detector, d.model);
-    $("server-status").textContent = d.detector_ready
-      ? "Локальный сервис готов" + (model ? " · " + model : "")
-      : "Сервис запущен · подготовьте детектор";
     const parts = [];
     if (/^[0-9a-f]{40}$/.test(d.release || "")) parts.push("Версия " + d.release.slice(0, 7));
     if (model) parts.push("Детектор " + model);
-    if (parts.length) $("release-info").textContent = parts.concat("Локальная обработка").join(" · ");
+    $("release-info").textContent = parts.join(" · ");
   })
   .catch(() => {
-    $("server-status").textContent = "Сервис недоступен";
+    $("release-info").textContent = "Сервис недоступен";
   });
 
 json("/api/v1/access")
