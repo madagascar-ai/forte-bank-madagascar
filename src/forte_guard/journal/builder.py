@@ -42,6 +42,9 @@ FRAGMENT_GAP_MAX_SEC = 2.0
 FRAGMENT_MIN_PIECES = 2
 # A cash track that changes side within this window counts as handed over.
 HANDOFF_WINDOW_SEC = 4.0
+# Cash that first appears on the counter while a client is at it is the client's: put down from the
+# client's side, it is often first seen only once it lies there. Picked up into the cashier's area within
+# HANDOFF_WINDOW_SEC, it was handed over even though no client-side sample was ever seen.
 # Objects that should not stay at the cashier's workstation (or only while she is there).
 WORKSTATION_ITEMS = ("personal_item", "phone", "cash_bag", "stamp", "folder")
 WORKSTATION_ZONES = {"cashier_area", "counter_area"}
@@ -288,7 +291,9 @@ def build_journal(
     batches: dict[str, Batch] = {}
     last_known_side = {}
     last_money: dict[str, tuple] = {}  # last raw observation of each cash track
+    counter_cash: dict[str, dict] = {}  # client cash first seen on the counter, until picked up
     locations = {}
+    first_location: dict[str, str | None] = {}
     object_states = {}
     emitted_device_contacts = set()
     last_observed = {}
@@ -310,6 +315,13 @@ def build_journal(
         "zone_source": profile.source,
         "complete_observation": False,
     }
+
+    def received_from_client(batch, action, frame):
+        if active_session:
+            batch.session_id = active_session
+            batch.provenance = "observed"
+            service_sessions.add(active_session)
+            state("service_active", True, frame, source_events=[action.event_id])
 
     def event(
         kind,
@@ -381,6 +393,7 @@ def build_journal(
             smoothers[(track_id, "state")].update(None)
             smoothers[(track_id, "owner")].update(None)
             smoothers[(track_id, "side")].update(None)
+            smoothers[(track_id, "document")].update(None)
         clients = [
             p
             for p in people
@@ -606,10 +619,12 @@ def build_journal(
                 continue
             if item.label == "document":
                 # No hand contact available: attribute to whichever client is nearest right now,
-                # not to "whoever's hand is on it" — session-scoped, not person-scoped.
+                # not to "whoever's hand is on it" — session-scoped, not person-scoped. A single-sample
+                # "document" is usually a misread stack or paper, and would excuse a missing ID check.
+                _, shown = smoothers[(item.track_id, "document")].update(True)
                 nearest_session = _nearest_session(item.box.center, clients, sessions, active_session)
                 contact_key = (item.track_id, nearest_session)
-                if nearest_session and contact_key not in emitted_device_contacts:
+                if shown and nearest_session and contact_key not in emitted_device_contacts:
                     event(
                         "document_presented",
                         frame,
@@ -648,11 +663,35 @@ def build_journal(
                     session=_nearest_session(item.box.center, clients, sessions, active_session),
                 )
                 action.evidence_frame_ids = list(dict.fromkeys([former[2], frame.frame_id]))
-                if from_role == "client" and active_session:
-                    batch.session_id = active_session
-                    batch.provenance = "observed"
-                    service_sessions.add(active_session)
-                    state("service_active", True, frame, source_events=[action.event_id])
+                if from_role == "client":
+                    received_from_client(batch, action, frame)
+            if item.track_id not in first_location:
+                first_location[item.track_id] = location
+                if location == "counter_area" and clients:
+                    counter_cash[item.track_id] = {
+                        "frame": frame,
+                        "last_sec": frame.timestamp_sec,
+                        "session": _nearest_session(item.box.center, clients, sessions, active_session),
+                    }
+            pending = counter_cash.get(item.track_id)
+            if pending and location == "counter_area":
+                pending["last_sec"] = frame.timestamp_sec
+            elif pending and location == "cashier_area":
+                del counter_cash[item.track_id]
+                if frame.timestamp_sec - pending["last_sec"] <= HANDOFF_WINDOW_SEC:
+                    action = event(
+                        "cash_transferred",
+                        frame,
+                        [],
+                        [item.track_id],
+                        {"from_role": "client", "to_role": "cashier", "inferred_from": "counter_pickup"},
+                        confidence=min(item.confidence, 0.6),
+                        start=pending["frame"].timestamp_sec,
+                        visibility="uncertain",
+                        session=pending["session"],
+                    )
+                    action.evidence_frame_ids = list(dict.fromkeys([pending["frame"].frame_id, frame.frame_id]))
+                    received_from_client(batch, action, frame)
             if stable_side:
                 last_known_side[item.track_id] = (stable_side, frame.timestamp_sec, frame.frame_id)
             last_money[item.track_id] = (side, frame, item, clients)

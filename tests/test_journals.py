@@ -316,3 +316,56 @@ def test_stack_reappearing_at_the_client_long_after_is_not_a_handover():
     frames += [[CASHIER, CLIENT, STACK_AT_CLIENT]]
     objects, profile = _scene(frames)
     assert _transfers(build_journal(objects, profile, 7, 5)) == []
+
+
+STACK_ON_COUNTER = ("stack", "money", [0.48, 0.45, 0.53, 0.5])
+
+
+def _with_counter(frames):
+    from forte_guard.contracts import Box, Zone
+
+    objects, profile = _scene(frames)
+    profile.zones.append(Zone(name="counter_area", box=Box(x1=0.4, y1=0.4, x2=0.6, y2=0.6)))
+    return objects, profile
+
+
+def _id_check_candidates(journal, settings):
+    rules, scenarios = load_catalog(settings.config_dir)
+    return [c for c in rule_candidates(journal, rules, scenarios) if c.rule_id == "cash_taken_without_id_check"]
+
+
+def _counter_then_cashier(gap=2, extra=()):
+    frames = [[CASHIER, CLIENT] for _ in range(10)] + [[CASHIER, CLIENT, STACK_ON_COUNTER, *extra] for _ in range(5)]
+    frames += [[CASHIER, CLIENT] for _ in range(gap)] + [[CASHIER, CLIENT, STACK_AT_CASHIER] for _ in range(5)]
+    return frames
+
+
+def test_client_cash_picked_up_from_the_counter_is_a_handover(settings):
+    # Put down from the client's side, the stack is first seen lying on the counter, then at the cashier.
+    objects, profile = _with_counter(_counter_then_cashier())
+    journal = build_journal(objects, profile, 5, 5)
+    transfers = _transfers(journal)
+    assert len(transfers) == 1 and (transfers[0].start_sec, transfers[0].end_sec) == (2.0, 3.4)
+    assert transfers[0].attributes == {"from_role": "client", "to_role": "cashier", "inferred_from": "counter_pickup"}
+    found = _id_check_candidates(journal, settings)
+    assert len(found) == 1 and found[0].timecode_sec == 3.4
+
+
+def test_counter_cash_is_not_a_handover_without_a_client_late_or_from_the_cashier():
+    alone = [[CASHIER, STACK_ON_COUNTER] for _ in range(5)] + [[CASHIER, STACK_AT_CASHIER] for _ in range(5)]
+    from_cashier = [[CASHIER, CLIENT, STACK_AT_CASHIER] for _ in range(5)] + _counter_then_cashier()[10:]
+    for frames in (alone, from_cashier, _counter_then_cashier(gap=25)):
+        objects, profile = _with_counter(frames)
+        assert _transfers(build_journal(objects, profile, 10, 5)) == []
+
+
+def test_a_document_seen_for_one_sample_does_not_excuse_the_id_check(settings):
+    flicker = [("doc", "document", [0.7, 0.45, 0.75, 0.5])]
+    frames = _counter_then_cashier()
+    frames[11] = [*frames[11], *flicker]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    assert not any(event.type == "document_presented" for event in journal.actions)
+    assert len(_id_check_candidates(journal, settings)) == 1
+    objects, profile = _with_counter(_counter_then_cashier(extra=flicker))
+    assert _id_check_candidates(build_journal(objects, profile, 5, 5), settings) == []
