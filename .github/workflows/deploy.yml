@@ -1,0 +1,97 @@
+name: Deploy
+# After green Tests on main: upload the commit to the GPU machine over Tailscale, activate it there
+# (drain jobs, switch, verify, roll back on failure), then refresh the HTTPS proxy on the VPS.
+on:
+  workflow_run:
+    workflows: [Tests]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  GPU: admin2@100.118.149.106
+  VPS: diyar@77.42.123.206
+  DOMAIN: madagascar-ai.team
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Check deploy secrets
+        id: ready
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          if [ -z "$TS_AUTHKEY" ]; then
+            echo "::notice::Deploy skipped: add the TS_AUTHKEY secret (Tailscale auth key, reusable + ephemeral)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Join the team tailnet (ephemeral node)
+        if: steps.ready.outputs.ok == 'true'
+        uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ secrets.TS_AUTHKEY }}
+          hostname: github-deploy
+
+      - name: SSH keys and pinned host keys
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_GPU_SSH_KEY }}" > ~/.ssh/gpu
+          printf '%s\n' "${{ secrets.DEPLOY_VPS_SSH_KEY }}" > ~/.ssh/vps
+          chmod 600 ~/.ssh/gpu ~/.ssh/vps
+          cp deploy/known_hosts ~/.ssh/known_hosts
+
+      - name: Upload the release to the GPU machine
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          ssh -i ~/.ssh/gpu -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$GPU" "mkdir -p forte-guard/releases/$SHA"
+          rsync -az --delete --exclude .git --exclude .github \
+            -e "ssh -i ~/.ssh/gpu -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            ./ "$GPU:forte-guard/releases/$SHA/"
+
+      - name: Activate on the GPU machine (drain, switch, verify, roll back on failure)
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          ssh -i ~/.ssh/gpu -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$GPU" \
+            "bash forte-guard/releases/$SHA/deploy/gpu/activate.sh $SHA"
+
+      - name: Refresh the HTTPS proxy on the VPS
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          rsync -az -e "ssh -i ~/.ssh/vps -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            deploy/vps/docker-compose.yml deploy/vps/Caddyfile "$VPS:forte-proxy/"
+          ssh -i ~/.ssh/vps -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "$VPS" \
+            'cd forte-proxy && docker compose up -d && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile'
+
+      - name: Public smoke check
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          for _ in $(seq 1 20); do
+            if curl -fsS -m 10 "https://$DOMAIN/health" | grep -q "\"release\":\"$SHA\""; then
+              echo "https://$DOMAIN serves $SHA"; exit 0
+            fi
+            sleep 6
+          done
+          echo "::warning::https://$DOMAIN does not serve $SHA yet (DNS or certificate may still be pending)"

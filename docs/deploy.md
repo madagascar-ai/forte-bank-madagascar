@@ -1,0 +1,42 @@
+# Деплой на сервер (GPU + публичный домен)
+
+```
+жюри → https://madagascar-ai.team → VPS (Caddy: HTTPS, домен)
+                                      │ Tailscale
+                                      ▼
+                    RTX 5090: Forte Guard (API + YOLO на GPU) → Gemma (Ollama, локально)
+```
+
+VPS только принимает HTTPS и пересылает запросы через Tailscale; видео обрабатываются и хранятся на машине команды с GPU. Сервис на 5090 слушает только адрес Tailscale (`100.118.149.106:8000`).
+
+## CI/CD
+
+`.github/workflows/deploy.yml` запускается после зелёного `Tests` на `main` (или вручную, Actions → Deploy → Run workflow):
+
+1. подключается к tailnet временным узлом (`TS_AUTHKEY`);
+2. загружает коммит на 5090 в `~/forte-guard/releases/<sha>/`;
+3. `deploy/gpu/activate.sh`: ждёт завершения задач в очереди (до 4 мин), переключает `~/forte-guard/app` на новый релиз, перезапускает службу, проверяет `/health` (нужный SHA) и readiness; при ошибке возвращает предыдущий релиз; хранит последние пять;
+4. обновляет `deploy/vps/` на VPS и перезагружает Caddy;
+5. проверяет `https://madagascar-ai.team/health` (предупреждение, а не ошибка, пока DNS или сертификат не готовы).
+
+Секреты репозитория: `TS_AUTHKEY` (Tailscale auth key, reusable + ephemeral), `DEPLOY_GPU_SSH_KEY`, `DEPLOY_VPS_SSH_KEY`. Отпечатки серверов закреплены в `deploy/known_hosts`. Без `TS_AUTHKEY` деплой пропускается.
+
+## Сервер с GPU (RTX 5090)
+
+```
+~/forte-guard/
+  app -> releases/<sha>     активная версия
+  releases/<sha>/           код релизов
+  venv/                     PyTorch (cu128), ultralytics, зависимости сервиса
+  shared/.env               настройки и API-ключ жюри (права 600)
+  shared/models/            веса детектора (detector-v2.pt)
+  shared/data/              задачи и результаты
+```
+
+Служба: `systemctl --user status|restart forte-guard` (unit — `deploy/gpu/forte-guard.service`, linger включён). Журнал: `journalctl --user -u forte-guard -f`. Ручная активация релиза: `bash ~/forte-guard/releases/<sha>/deploy/gpu/activate.sh <sha>`.
+
+Новые веса не приезжают через git: положить файл в `shared/models/` и указать его в `shared/.env` (`FORTE_MODEL_PATH`), затем `systemctl --user restart forte-guard`.
+
+## VPS
+
+`~/forte-proxy/` — `deploy/vps/docker-compose.yml` и `Caddyfile`: контейнер Tailscale (порты 80/443) и Caddy в его сети, сертификат Let's Encrypt для `madagascar-ai.team` и `www`. DNS: записи `A @` и `A www` → `77.42.123.206`.

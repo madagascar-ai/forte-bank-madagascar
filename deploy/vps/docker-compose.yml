@@ -1,0 +1,34 @@
+# Public entry for the jury: HTTPS on the domain, forwarded over Tailscale to the GPU machine.
+# The VPS only proxies requests; videos are processed and stored on the team machine.
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: forte-proxy
+    environment:
+      TS_HOSTNAME: forte-proxy
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    volumes:
+      - ./ts-state:/var/lib/tailscale
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    # Shares the Tailscale network namespace, so 100.x addresses are reachable directly.
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-data:/data
+      - ./caddy-config:/config
+    restart: unless-stopped

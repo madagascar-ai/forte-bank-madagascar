@@ -1,0 +1,14 @@
+[Unit]
+Description=Forte Guard API (YOLO on the GPU + local Gemma via Ollama)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/forte-guard/app
+# The release SHA is shown in /health and on the page.
+ExecStart=/bin/sh -c 'exec "$HOME/forte-guard/venv/bin/forte-guard" serve --deployment-id "$(cat REVISION 2>/dev/null || echo workspace)"'
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+madagascar-ai.team, www.madagascar-ai.team {
+	encode gzip
+	# Uploads up to the service limit (256 MB) plus multipart overhead.
+	request_body {
+		max_size 270MB
+	}
+	# The GPU machine (RTX 5090) on the team tailnet; the service listens only on this address.
+	reverse_proxy 100.118.149.106:8000 {
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+}
