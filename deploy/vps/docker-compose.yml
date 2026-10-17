@@ -4,10 +4,10 @@ services:
   tailscale:
     image: tailscale/tailscale:stable
     hostname: forte-proxy
-    environment:
-      TS_HOSTNAME: forte-proxy
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "false"
+    # Run tailscaled directly: the image's default entrypoint gives an interactive login only 60 s
+    # and then restarts with a new key. State persists in ./ts-state, so one login is enough:
+    #   docker compose exec tailscale tailscale up --hostname=forte-proxy
+    entrypoint: ["tailscaled", "--state=/var/lib/tailscale/tailscaled.state", "--statedir=/var/lib/tailscale"]
     volumes:
       - ./ts-state:/var/lib/tailscale
     devices:
