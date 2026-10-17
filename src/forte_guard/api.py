@@ -195,6 +195,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "local_only": True,
             "verification_mode": "structural_only",
             "release": os.getenv("FORTE_RELEASE_SHA", "workspace"),
+            # Which detector answers right now, so the page and reviewers see the model in use.
+            "detector": settings.detector,
+            "model": settings.model_path.name,
         }
 
     @app.post("/api/v1/analyze", status_code=202)

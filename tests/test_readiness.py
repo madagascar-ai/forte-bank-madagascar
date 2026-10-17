@@ -51,3 +51,12 @@ def test_open_vocabulary_detectors_require_the_configured_vocabulary(settings):
         assert not next(item for item in report["checks"] if item["name"] == "detector_vocabulary")["ready"]
     settings.detector = "yolo"
     assert all(item["name"] != "detector_vocabulary" for item in inspect_readiness(settings)["checks"])
+
+
+def test_health_names_the_detector_without_exposing_paths(settings):
+    settings.detector = "yolo"
+    with TestClient(create_app(settings)) as client:
+        health = client.get("/health").json()
+    assert health["detector"] == "yolo"
+    assert health["model"] == settings.model_path.name
+    assert str(settings.model_path.parent) not in str(health)

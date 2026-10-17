@@ -475,16 +475,22 @@ $("download-json").onclick = () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+// Fine-tuned weights are named by release (detector-v2.pt); zero-shot modes by their family.
+function detectorLabel(detector, model) {
+  if (detector === "yolo" && model) return model.replace(/\.pt$/, "");
+  return { world: "YOLO-World", yoloe: "YOLOE-26", replay: "replay" }[detector] || "";
+}
 fetch("/health")
   .then((r) => r.json())
   .then((d) => {
+    const model = detectorLabel(d.detector, d.model);
     $("server-status").textContent = d.detector_ready
-      ? "Локальный сервис готов"
+      ? "Локальный сервис готов" + (model ? " · " + model : "")
       : "Сервис запущен · подготовьте детектор";
-    if (/^[0-9a-f]{40}$/.test(d.release || "")) {
-      $("release-info").textContent =
-        "Версия " + d.release.slice(0, 7) + " · Локальная обработка";
-    }
+    const parts = [];
+    if (/^[0-9a-f]{40}$/.test(d.release || "")) parts.push("Версия " + d.release.slice(0, 7));
+    if (model) parts.push("Детектор " + model);
+    if (parts.length) $("release-info").textContent = parts.concat("Локальная обработка").join(" · ");
   })
   .catch(() => {
     $("server-status").textContent = "Сервис недоступен";
