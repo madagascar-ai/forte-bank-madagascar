@@ -18,6 +18,17 @@ def offline_environment(settings: Settings) -> None:
     os.environ["HF_HUB_OFFLINE"] = "1"
 
 
+def keep_strongest(detections: list[Detection], labels: set[str]) -> list[Detection]:
+    """Keep only the most confident detection of each single-instance label; others pass unchanged."""
+    best: dict[str, Detection] = {}
+    for detection in detections:
+        if detection.label in labels and (
+            detection.label not in best or detection.confidence > best[detection.label].confidence
+        ):
+            best[detection.label] = detection
+    return [d for d in detections if d.label not in labels or best[d.label] is d]
+
+
 class YoloTracker:
     """One model/tracker instance per video: track IDs never leak across jobs."""
 
@@ -43,6 +54,7 @@ class YoloTracker:
             )
         config = json.loads((settings.config_dir / "detector.json").read_text())
         self.aliases = config.get("aliases", {})
+        self.single_instance = set(config.get("single_instance", []))
         self.names = list(self.model.names.values())
         self.prompt_to_class = {text: label for label, text in config.get("prompts", {}).items()}
         if settings.detector in OPEN_VOCABULARY and set(self.names) != set(self.prompt_to_class):
@@ -93,6 +105,7 @@ class YoloTracker:
                             attributes=attributes,
                         )
                     )
+            observations = keep_strongest(observations, self.single_instance)
             journal.append(
                 ObjectFrame(
                     frame_id=frame.frame_id, timestamp_sec=frame.timestamp_sec, detections=observations

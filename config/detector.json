@@ -23,5 +23,6 @@
     "id_card": "document",
     "counter": "counting_machine"
   },
-  "notes": "Zero-shot baseline. Fine-tune and evaluate classes; prompts do not guarantee recognition accuracy."
+  "single_instance": ["door"],
+  "notes": "single_instance: classes that appear once per frame; only the most confident box is kept (the fine-tuned detector boxes one door 3-4 times). Zero-shot baseline. Fine-tune and evaluate classes; prompts do not guarantee recognition accuracy."
 }
