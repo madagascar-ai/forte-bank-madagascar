@@ -87,11 +87,30 @@ async function history() {
               : "Обрабатывается",
         ),
       );
-      b.onclick = () => selectJob(j.job_id, j.filename);
+      b.onclick = () => {
+        toggleHistory(false);
+        selectJob(j.job_id, j.filename);
+      };
       return b;
     }),
   );
 }
+// "История" is a dropdown in the top bar: closes on choice, on Escape and on a click outside.
+function toggleHistory(open = $("history").classList.contains("hidden")) {
+  show("history", open);
+  $("history-toggle").setAttribute("aria-expanded", String(open));
+  $("history-toggle").classList.toggle("open", open);
+}
+$("history-toggle").onclick = (e) => {
+  e.stopPropagation();
+  toggleHistory();
+};
+document.addEventListener("click", (e) => {
+  if (!$("history-section").contains(e.target)) toggleHistory(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") toggleHistory(false);
+});
 $("connect").onclick = async () => {
   S.key = $("api-key").value.trim();
   try {
@@ -509,6 +528,8 @@ json("/api/v1/access")
       S.guest = true;
       S.connected = true;
       show("history-section", false);
+      // The jury needs only the upload and the result; the debug tabs are for the team copy.
+      show("result-tabs", false);
     } else if (access.authorized) {
       S.connected = true;
       await history();

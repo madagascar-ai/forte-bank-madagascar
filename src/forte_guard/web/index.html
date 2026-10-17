@@ -8,24 +8,32 @@
     <link rel="stylesheet" href="/assets/style.css" />
   </head>
   <body>
-    <aside class="sidebar">
-      <a class="brand" href="/"
-        ><img class="brand-logo" src="/assets/forte-logo.png" alt="Forte" width="306" height="100" /><span class="brand-product">guard</span></a
-      >
-      <div class="sidebar-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
-      <button class="nav active" id="new-job">＋ Новая проверка</button>
-      <button class="nav hidden" id="benchmark-nav">Бенчмарк</button>
-      <div id="history-section">
-        <div class="sidebar-label">ПОСЛЕДНИЕ ПРОВЕРКИ</div>
-        <div id="history" class="history"></div>
+    <header class="topbar">
+      <span class="topbar-art" aria-hidden="true"></span>
+      <div class="topbar-inner">
+        <a class="brand" href="/"
+          ><img class="brand-logo" src="/assets/forte-logo.png" alt="Forte" width="306" height="100" /><span class="brand-product">guard</span></a
+        >
+        <nav class="topnav" aria-label="Навигация">
+          <button class="nav active" id="new-job">＋ Новая проверка</button>
+          <button class="nav hidden" id="benchmark-nav">Бенчмарк</button>
+          <div id="history-section" class="history-menu">
+            <button class="nav" id="history-toggle" aria-expanded="false" aria-controls="history">
+              История
+            </button>
+            <div id="history" class="history hidden"></div>
+          </div>
+        </nav>
       </div>
-    </aside>
+    </header>
     <main>
-      <header>
-        <div>
-          <span class="eyebrow">КАССОВЫЕ ОПЕРАЦИИ</span>
-          <h1>Проверка видеозаписи кассы</h1>
-        </div>
+      <header class="page-header">
+        <span class="eyebrow">КАССОВЫЕ ОПЕРАЦИИ</span>
+        <h1>Проверка видеозаписи кассы</h1>
+        <p class="lead">
+          Загрузите видео работы кассира — система построит журнал действий и
+          выделит признаки возможных нарушений.
+        </p>
       </header>
       <section class="connection hidden" id="connection-panel">
         <label for="api-key">Ключ доступа</label
@@ -38,13 +46,6 @@
         ><span id="connection-status"></span>
       </section>
       <section id="upload-view">
-        <div class="intro hero">
-          <h2>От записи — к проверяемому событию</h2>
-          <p>
-            Загрузите видео работы кассира. Система построит журнал действий и
-            выделит признаки возможных нарушений.
-          </p>
-        </div>
         <form id="upload-form">
           <label class="dropzone" id="dropzone" for="video-file"
             ><span class="upload-symbol">↥</span
@@ -85,7 +86,7 @@
         <div id="result-panel" class="hidden">
           <div id="verdict" class="verdict"></div>
           <div class="metrics" id="metrics"></div>
-          <div class="tabs" role="tablist">
+          <div class="tabs" id="result-tabs" role="tablist">
             <button class="tab active" data-tab="findings">Результат</button
             ><button class="tab" data-tab="actions">Журнал действий</button
             ><button class="tab" data-tab="objects">Объекты и треки</button
