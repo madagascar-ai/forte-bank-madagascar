@@ -14,6 +14,14 @@
     "document": "identity card",
     "counting_machine": "banknote counting machine"
   },
-  "aliases": {"cell phone": "phone", "handbag": "bag", "backpack": "bag", "laptop": "laptop"},
+  "aliases": {
+    "cell phone": "phone",
+    "handbag": "bag",
+    "backpack": "bag",
+    "laptop": "laptop",
+    "cash": "money",
+    "id_card": "document",
+    "counter": "counting_machine"
+  },
   "notes": "Zero-shot baseline. Fine-tune and evaluate classes; prompts do not guarantee recognition accuracy."
 }

@@ -70,3 +70,32 @@ def test_pipeline_estimates_zones_without_operator_input(settings, demo, tmp_pat
     saved = json.loads((output / "zones.json").read_text())
     assert saved["source"] == "auto_tracks" and saved["zones"]
     assert "Зоны определены автоматически; проверьте их расположение." in result.warnings
+
+
+def test_stateless_fixtures_from_detector_locate_storage_exit_and_cashier():
+    # The detector reports "safe"/"door"/"laptop" (state stripped or absent in fine-tuned weights).
+    frames = []
+    for index in range(40):
+        items = [
+            detection("a", "person", [0.05, 0.2, 0.3, 0.9]),
+            detection("b", "person", [0.7, 0.2, 0.95, 0.9]) if index % 10 < 6 else None,
+            detection("safe", "safe", [0.02, 0.05, 0.12, 0.18]),
+            detection("door", "door", [0.85, 0.0, 0.98, 0.15]),
+            detection("laptop", "laptop", [0.2, 0.55, 0.3, 0.62]),
+        ]
+        frames.append([item for item in items if item])
+    profile, _ = estimate_zones(journal(frames))
+    assert zone(profile, "storage_area").contains((0.07, 0.11))
+    assert zone(profile, "exit_area").contains((0.9, 0.07))
+    assert zone(profile, "cashier_area").contains((0.175, 0.55))
+
+
+def test_fine_tuned_classes_map_to_journal_vocabulary():
+    root = __import__("pathlib").Path(__file__).resolve().parents[1]
+    aliases = json.loads((root / "config/detector.json").read_text())["aliases"]
+    trained = {
+        item["name"] for item in json.loads((root / "config/training_classes.json").read_text())["classes"]
+    }
+    journal_names = {"person", "money", "document", "counting_machine", "safe", "door", "laptop"}
+    mapped = {aliases.get(name, name) for name in trained}
+    assert journal_names <= mapped

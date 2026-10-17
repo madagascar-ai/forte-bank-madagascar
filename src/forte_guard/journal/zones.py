@@ -10,9 +10,11 @@ from ..contracts import Box, Detection, ObjectJournal, Zone, ZoneProfile
 
 PEOPLE = {"person", "cashier", "client"}
 # Objects a cashier works with; proximity to them separates the cashier from a long-staying client.
-WORK_OBJECTS = {"counting_machine", "laptop_open", "laptop_closed", "safe_open", "safe_closed"}
-STORAGE = {"safe_open", "safe_closed"}
-EXITS = {"door_open", "door_closed"}
+# The detector strips "_open"/"_closed" into attributes, and fine-tuned weights detect these objects
+# without a state, so zones match the base label.
+WORK_OBJECTS = {"counting_machine", "laptop", "safe"}
+STORAGE = {"safe"}
+EXITS = {"door"}
 # Items that rest on the counter while cash is handled; only stationary detections count.
 RESTING_ITEMS = {"money", "document"}
 # Without these the journal cannot assign roles or locate cash, so a fallback is worth trying.
