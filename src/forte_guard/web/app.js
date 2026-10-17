@@ -574,6 +574,10 @@ fetch("/health")
     $("server-status").textContent = d.detector_ready
       ? "Локальный сервис готов"
       : "Сервис запущен · подготовьте детектор";
+    if (/^[0-9a-f]{40}$/.test(d.release || "")) {
+      $("release-info").textContent =
+        "Версия " + d.release.slice(0, 7) + " · Локальная обработка";
+    }
   })
   .catch(() => {
     $("server-status").textContent = "Сервис недоступен";
