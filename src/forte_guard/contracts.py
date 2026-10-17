@@ -141,6 +141,8 @@ class Rule(Contract):
     engine: dict[str, Any]
     document: dict[str, str]
     conditions: str = ""
+    # What is visible, in plain words, for the reviewer; {t} is the timecode in seconds.
+    observation: str = ""
     required_capabilities: list[str] = Field(default_factory=list)
 
 

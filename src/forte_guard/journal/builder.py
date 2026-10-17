@@ -6,6 +6,35 @@ from itertools import pairwise
 
 from ..contracts import Action, ActionJournal, Batch, Detection, ObjectJournal, State, ZoneProfile
 
+# The detector vocabulary evolves; the journal keeps one internal name per object kind.
+LABEL_ALIASES = {
+    "cash": "money",
+    "banknote": "money",
+    "banknotes": "money",
+    "id_card": "document",
+    "identity_card": "document",
+    "smartphone": "phone",
+    "cell phone": "phone",
+    "counting_machine": "counter",
+    "banknote counting machine": "counter",
+}
+# Counting is inferred from geometry, not from a model: cash stays inside the counting machine for
+# at least COUNT_MIN_SEC, and the cashier's hand is at the machine shortly before and after.
+COUNT_MIN_SEC = 1.0
+COUNT_HAND_WINDOW_SEC = 2.0
+# Objects that should not stay at the cashier's workstation (or only while she is there).
+WORKSTATION_ITEMS = ("personal_item", "phone", "cash_bag", "stamp", "folder")
+WORKSTATION_ZONES = {"cashier_area", "counter_area"}
+TRANSITIONS = {"open": "opened", "closed": "closed", "on": "turned_on", "off": "turned_off"}
+
+
+def _overlaps(inner: Detection, outer: Detection, margin: float = 0.03) -> bool:
+    x, y = inner.box.center
+    return (
+        outer.box.x1 - margin <= x <= outer.box.x2 + margin
+        and outer.box.y1 - margin <= y <= outer.box.y2 + margin
+    )
+
 
 def zone_of(item: Detection, profile: ZoneProfile) -> str | None:
     # A narrow counter/storage zone takes priority over a broad room area.
@@ -91,6 +120,9 @@ def _contact(money: Detection, hands: list[Detection], people: list[Detection]):
 
 
 def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float, fps: float) -> ActionJournal:
+    for frame in objects.frames:
+        for item in frame.detections:
+            item.label = LABEL_ALIASES.get(item.label, item.label)
     roles = assign_roles(objects, profile)
     journal = ActionJournal(duration_sec=duration, sample_fps=fps, roles=roles)
     journal.warnings.extend(objects.warnings)
@@ -99,7 +131,6 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
     elif profile.source.startswith("auto"):
         journal.warnings.append("Зоны определены автоматически; проверьте их расположение.")
     journal.unsupported_actions = [
-        "cash_counted",
         "authenticity_verified",
         "identity_verified",
         "safe_locked",
@@ -117,6 +148,11 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
         "device_used_observed",
         "document_presented",
         "cash_entered_storage_area",
+        "previous_cash_on_counter",
+        "workstation_items_observed",
+        "safe_key_in_lock",
+        "extra_person_present",
+        "cash_counted",
     ]
     required = max(1, math.ceil(fps * 0.4))
     smoothers = defaultdict(lambda: StableValue(required))
@@ -131,6 +167,12 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
     object_states = {}
     emitted_device_contacts = set()
     last_observed = {}
+    first_seen: dict[str, float] = {}
+    session_started: dict[str, float] = {}
+    session_order: list[str] = []
+    cashier_hand_at_counter: list[float] = []
+    counting: dict | None = None  # current stay of cash inside the machine
+    pending_counts: list[dict] = []
     frame_times = [frame.timestamp_sec for frame in objects.frames]
     journal.coverage = {
         "first_frame_sec": frame_times[0] if frame_times else None,
@@ -218,6 +260,8 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
                 sessions[person.track_id] = f"session_{len(sessions) + 1:04d}"
                 old_session = active_session
                 active_session = sessions[person.track_id]
+                session_started[active_session] = frame.timestamp_sec
+                session_order.append(active_session)
                 event("client_observed", frame, [person.track_id], attributes={"role": "client"})
                 if old_session and old_session != active_session:
                     journal.coverage.setdefault("session_transitions_observed", True)
@@ -248,10 +292,82 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
         state("service_active", True if active_session in service_sessions else None, frame)
 
         for item in frame.detections:
+            first_seen.setdefault(item.track_id, frame.timestamp_sec)
+        # Cash that was already on the counter before the current client arrived belongs to an
+        # earlier operation (Rules No. 231, p. 20). New track IDs never count as earlier cash.
+        previous_cash = None
+        if active_session and session_order.index(active_session) > 0:
+            started = session_started[active_session]
+            if any(first_seen[m.track_id] < started - 0.5 for m in observed_counter_cash):
+                previous_cash = True
+        state("previous_cash_on_counter", previous_cash, frame)
+
+        for label in WORKSTATION_ITEMS:
+            found = []
+            for item in frame.detections:
+                if item.label != label or zone_of(item, profile) not in WORKSTATION_ZONES:
+                    continue
+                if label == "phone" and roles.get(_contact(item, hands, people) or "") == "client":
+                    continue  # a client may show a digital ID on the phone (p. 19.1, p. 31.1)
+                found.append(item.track_id)
+            state(f"{label}_at_workstation", True if found else None, frame)
+
+        safes = [d for d in frame.detections if d.label == "safe"]
+        keys_in_lock = [
+            k for k in frame.detections if k.label == "safe_key" and any(_overlaps(k, s) for s in safes)
+        ]
+        state("safe_key_in_lock", True if keys_in_lock else None, frame)
+
+        counters = [d for d in frame.detections if d.label == "counter"]
+        cashier_people = [p for p in people if roles.get(p.track_id) == "cashier"]
+        if counters and any(
+            any(_overlaps(h, c) for c in counters) and any(_overlaps(h, p, 0.08) for p in cashier_people)
+            for h in hands
+        ):
+            cashier_hand_at_counter.append(frame.timestamp_sec)
+        cash_in_machine = [m for m in money_items if any(_overlaps(m, c, 0.0) for c in counters)]
+        if cash_in_machine:
+            if counting is None:
+                counting = {"start": frame.timestamp_sec, "frame": frame, "objects": set()}
+            counting["end"], counting["last_frame"] = frame.timestamp_sec, frame
+            counting["objects"].update(m.track_id for m in cash_in_machine)
+        elif counting is not None:
+            if counting["end"] - counting["start"] >= COUNT_MIN_SEC:
+                pending_counts.append(counting)
+            counting = None
+        for stay in list(pending_counts):
+            before = any(
+                stay["start"] - COUNT_HAND_WINDOW_SEC <= t <= stay["start"] + 0.5
+                for t in cashier_hand_at_counter
+            )
+            after = any(
+                stay["end"] - 0.5 <= t <= stay["end"] + COUNT_HAND_WINDOW_SEC for t in cashier_hand_at_counter
+            )
+            if before and after:
+                counted = event(
+                    "cash_counted",
+                    stay["last_frame"],
+                    [key for key, role in roles.items() if role == "cashier"],
+                    sorted(stay["objects"]),
+                    attributes={"method": "counting_machine"},
+                    confidence=0.6,
+                    start=stay["start"],
+                )
+                counted.evidence_frame_ids = list(
+                    dict.fromkeys([stay["frame"].frame_id, stay["last_frame"].frame_id])
+                )
+                pending_counts.remove(stay)
+            elif frame.timestamp_sec > stay["end"] + COUNT_HAND_WINDOW_SEC:
+                pending_counts.remove(stay)
+
+        others = [p for p in people if roles.get(p.track_id) != "cashier"]
+        state("extra_person_present", True if len(others) >= 2 else None, frame)
+
+        for item in frame.detections:
             previous_time = last_observed.get(item.track_id)
             contiguous = previous_time is not None and frame.timestamp_sec - previous_time <= 1.5 / fps + 0.05
             last_observed[item.track_id] = frame.timestamp_sec
-            if item.attributes.get("state") in {"open", "closed"}:
+            if item.attributes.get("state") in {"open", "closed", "on", "off"}:
                 value = item.attributes["state"]
                 _, new_value = smoothers[(item.track_id, "state")].update(value)
                 state(
@@ -265,7 +381,7 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
                     kind = (
                         f"{item.label}_state_observed"
                         if item.track_id not in object_states or not contiguous
-                        else (f"{item.label}_{'opened' if new_value == 'open' else 'closed'}")
+                        else f"{item.label}_{TRANSITIONS.get(new_value, new_value)}"
                     )
                     event(
                         kind,
@@ -352,6 +468,7 @@ def build_journal(objects: ObjectJournal, profile: ZoneProfile, duration: float,
     journal.batches = list(batches.values())
     journal.actions.sort(key=lambda a: (a.start_sec, a.end_sec, a.event_id))
     journal.warnings.append(
-        "Пересчёт, идентификация и состояние замка базовой геометрией не устанавливаются."
+        "Пересчёт на счётной машинке распознаётся приближённо, по геометрии рук и купюр; "
+        "идентификация и состояние замка сейфа базовой геометрией не устанавливаются."
     )
     return journal

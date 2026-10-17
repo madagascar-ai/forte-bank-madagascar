@@ -1,12 +1,11 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "rules": [
     {
       "id": "cashier_left_during_service",
-      "title": "Признаки ухода кассира во время обслуживания",
+      "title": "Уход кассира с рабочего места во время обслуживания",
       "kind": "state",
-      "enabled": true,
-      "source_status": "needs_review",
+      "source_status": "verified",
       "engine": {
         "type": "overlap",
         "states": {
@@ -19,57 +18,354 @@
         "anchor_event": "cashier_left_workstation"
       },
       "document": {
-        "title": "Правила осуществления кассовых операций, постановление НБРК № 231 от 29.11.2019",
-        "clause": "пункт 22; применимость и редакция требуют проверки",
-        "url": "https://adilet.zan.kz/rus/docs/V1900019680"
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 22: кассовому работнику не допускается покидать рабочее место до окончания обслуживания клиента"
       },
-      "conditions": "Need observed service, visible departure and sufficient workstation coverage. Technical dwell time is not a legal grace period."
+      "observation": "На {t} с кассир покидает рабочее место, клиент остаётся у стола, наличные лежат на столе.",
+      "conditions": "Обслуживание наблюдалось (деньги переданы клиентом), уход кассира виден."
     },
     {
       "id": "cash_from_previous_session",
-      "title": "Признаки смешивания денег разных клиентов",
-      "kind": "action",
-      "enabled": true,
-      "source_status": "needs_review",
+      "title": "Наличные другого клиента на рабочем месте",
+      "kind": "state",
+      "source_status": "verified",
       "engine": {
-        "type": "event",
-        "event_type": "cash_batches_mixed_across_sessions",
+        "type": "overlap",
+        "states": {
+          "previous_cash_on_counter": true
+        },
+        "min_duration_sec": 1.0
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 20: на рабочем месте кассового работника находятся наличные деньги клиента; ранее принятые хранятся в запирающихся устройствах"
+      },
+      "observation": "На {t} с, во время обслуживания следующего клиента, на столе находятся наличные, лежавшие там до его прихода.",
+      "conditions": "Пачка видна на столе непрерывно с момента до прихода нового клиента; новая пачка не считается прежней."
+    },
+    {
+      "id": "cash_unattended",
+      "title": "Наличные оставлены без присмотра",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "cash_on_counter": true,
+          "cashier_present": false
+        },
+        "min_duration_sec": 3.0,
+        "exclusive_with": [
+          "cashier_left_during_service"
+        ]
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 20: ранее принятые наличные хранятся в специальных устройствах на рабочем месте, закрывающихся на ключ"
+      },
+      "observation": "С {t} с наличные лежат на столе, кассир отсутствует на рабочем месте.",
+      "conditions": "Не менее 3 с; если идёт обслуживание клиента, срабатывает правило об уходе кассира."
+    },
+    {
+      "id": "cash_room_door_open",
+      "title": "Не закрыта дверь кассы",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "door_door_state": "open"
+        },
+        "min_duration_sec": 4.0,
         "allow_cross_session": true
       },
       "document": {
-        "title": "Правила осуществления кассовых операций, постановление НБРК № 231 от 29.11.2019",
-        "clause": "пункт 20; применимость и редакция требуют проверки",
-        "url": "https://adilet.zan.kz/rus/docs/V1900019680"
+        "title": "Правила организации охраны и устройства помещений банков второго уровня, постановление Правления НБРК от 24.02.2020 № 14",
+        "url": "https://adilet.zan.kz/rus/docs/V2000020075",
+        "clause": "пункт 16 подпункт 1: касса имеет отдельный вход с закрывающейся на замок дверью; пункт 8 — трактовка"
       },
-      "conditions": "Batch provenance must be observed; two arbitrary piles do not establish different clients."
+      "observation": "Дверь в помещение кассы остаётся открытой с {t} с во время работы.",
+      "conditions": "Дверь открыта не менее 4 с; короткий проход человека не считается."
+    },
+    {
+      "id": "safe_left_open",
+      "title": "Не закрыт сейф",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "safe_door_state": "open"
+        },
+        "min_duration_sec": 6.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 20: наличные хранятся в специальных устройствах, закрывающихся на ключ (металлический шкаф, сейф)"
+      },
+      "observation": "Дверца сейфа остаётся открытой с {t} с.",
+      "conditions": "Не менее 6 с; кратковременное открытие для закладки или выемки денег не считается."
+    },
+    {
+      "id": "safe_key_left_in_lock",
+      "title": "Ключ оставлен в замке сейфа",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "safe_key_in_lock": true
+        },
+        "min_duration_sec": 5.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 80: порядок хранения ключей от устройств для хранения наличных обеспечивает исключение их несанкционированного использования — трактовка"
+      },
+      "observation": "С {t} с в замке сейфа находится ключ.",
+      "conditions": "Ключ в замке не менее 5 с."
+    },
+    {
+      "id": "personal_items_at_workstation",
+      "title": "Личные вещи на рабочем месте кассира",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "personal_item_at_workstation": true
+        },
+        "min_duration_sec": 2.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 12: хранение личных вещей работников осуществляется вне кассового узла"
+      },
+      "observation": "С {t} с на рабочем месте кассира находятся личные вещи (одежда, сумка или напиток).",
+      "conditions": "Предмет в зоне кассира не менее 2 с."
+    },
+    {
+      "id": "phone_at_workstation",
+      "title": "Личные вещи на рабочем месте кассира",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "phone_at_workstation": true
+        },
+        "min_duration_sec": 2.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 12: допускается внос средств связи, не имеющих функции фото и видео фиксации"
+      },
+      "observation": "С {t} с на рабочем месте кассира находится смартфон.",
+      "conditions": "Телефон клиента (в том числе с цифровым документом, п. 19 пп. 1) не учитывается."
+    },
+    {
+      "id": "laptop_left_unattended",
+      "title": "Рабочий ноутбук оставлен включённым без присмотра",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "laptop_state": "on",
+          "cashier_present": false
+        },
+        "min_duration_sec": 3.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Требования к обеспечению информационной безопасности банков, постановление Правления АРРФР от 03.04.2026 № 53; Правила НБРК № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V2600038336",
+        "clause": "Требования № 53, пункт 71 подпункт 9 (блокировка рабочей станции или ноутбука для защиты от несанкционированного доступа); Правила № 231, пункт 2 подпункт 17 (электронные носители с банковской защищаемой информацией — ценности) — трактовка"
+      },
+      "observation": "Кассир покидает рабочее место, рабочий ноутбук остаётся открытым и включённым с {t} с.",
+      "conditions": "Сервис не видит, заблокирован ли экран паролем; видно, что экран включён, а кассира нет не менее 3 с."
+    },
+    {
+      "id": "cash_bag_left_on_desk",
+      "title": "Ценности не убраны в хранилище",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "cash_bag_at_workstation": true,
+          "cashier_present": false
+        },
+        "min_duration_sec": 2.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 20: ранее принятые наличные хранятся в закрывающихся на ключ устройствах"
+      },
+      "observation": "С {t} с инкассаторская сумка остаётся на столе, кассир отсутствует на рабочем месте.",
+      "conditions": "Сумка на столе при отсутствии кассира не менее 2 с."
+    },
+    {
+      "id": "stamp_left_on_desk",
+      "title": "Ценности не убраны в хранилище",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "stamp_at_workstation": true,
+          "cashier_present": false
+        },
+        "min_duration_sec": 2.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 80: порядок хранения печатей и именных штампов исключает их несанкционированное использование — трактовка"
+      },
+      "observation": "С {t} с штамп остаётся на столе, кассир отсутствует на рабочем месте.",
+      "conditions": "Штамп на столе при отсутствии кассира не менее 2 с."
+    },
+    {
+      "id": "folder_left_on_desk",
+      "title": "Ценности не убраны в хранилище",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "folder_at_workstation": true,
+          "cashier_present": false
+        },
+        "min_duration_sec": 2.0,
+        "allow_cross_session": true,
+        "exclusive_with": [
+          "stamp_left_on_desk"
+        ]
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 2 подпункт 17: бланки документов относятся к ценностям; пункт 80 — трактовка"
+      },
+      "observation": "С {t} с папка с документами остаётся на столе, кассир отсутствует на рабочем месте.",
+      "conditions": "Папка на столе при отсутствии кассира не менее 2 с."
+    },
+    {
+      "id": "extra_person_during_service",
+      "title": "Посторонний в помещении кассы во время обслуживания",
+      "kind": "state",
+      "source_status": "verified",
+      "engine": {
+        "type": "overlap",
+        "states": {
+          "extra_person_present": true
+        },
+        "min_duration_sec": 2.0,
+        "allow_cross_session": true
+      },
+      "document": {
+        "title": "Правила организации охраны и устройства помещений банков второго уровня, постановление Правления НБРК от 24.02.2020 № 14",
+        "url": "https://adilet.zan.kz/rus/docs/V2000020075",
+        "clause": "пункт 8 (кассовый узел изолирован от других помещений) и пункт 16 подпункт 1 (касса имеет отдельный вход с закрывающейся дверью) — трактовка"
+      },
+      "observation": "С {t} с в помещении кассы, кроме кассира, одновременно находятся двое посторонних.",
+      "conditions": "Не менее 2 с. Внимание: бригада инкассаторов из 2–3 человек (Правила № 231, п. 98) может дать ложное срабатывание."
+    },
+    {
+      "id": "cash_taken_without_id_check",
+      "title": "Работа с наличными клиента без проверки документа",
+      "kind": "action",
+      "source_status": "verified",
+      "engine": {
+        "type": "without_prior",
+        "closing_event": "cash_transferred",
+        "closing_attributes": {
+          "from_role": "client",
+          "to_role": "cashier"
+        },
+        "min_confidence": 0.5,
+        "prior_events": [
+          "document_presented",
+          "device_used_observed"
+        ],
+        "same_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 7 (приём наличных после надлежащей проверки клиента) и пункт 19 подпункт 1 (визуальная идентификация клиента по документу или цифровому документу)"
+      },
+      "observation": "На {t} с кассир берёт наличные клиента; передача или осмотр документа клиента до этого не наблюдались.",
+      "conditions": "Проверяется для каждого клиента отдельно; показ документа или экрана телефона в рамках той же сессии обслуживания снимает срабатывание."
     },
     {
       "id": "payout_without_observed_count",
-      "title": "Не наблюдался пересчёт выдаваемой части денег",
-      "kind": "omission",
-      "enabled": false,
-      "source_status": "needs_review",
+      "title": "Передача наличных клиенту без пересчёта",
+      "kind": "action",
+      "source_status": "verified",
       "required_capabilities": [
         "cash_counted"
       ],
       "engine": {
-        "type": "before_event",
-        "required_event": "cash_counted",
+        "type": "without_prior",
         "closing_event": "cash_transferred",
         "closing_attributes": {
           "to_role": "client"
         },
+        "prior_events": [
+          "cash_counted"
+        ],
         "same_object": true,
-        "required_context_flags": [
-          "packaging_exceptions_checked"
-        ]
+        "same_session": true,
+        "min_confidence": 0.5
       },
       "document": {
-        "title": "Правила осуществления кассовых операций, постановление НБРК № 231 от 29.11.2019",
-        "clause": "пункт 31 подпункт 4, пункт 32; проверить исключения и редакцию",
-        "url": "https://adilet.zan.kz/rus/docs/V1900019680"
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 31 подпункт 4 (пересчёт подготовленных к выдаче денег в присутствии клиента) и пункт 32 (без полистного пересчёта — только в целой банковской упаковке)"
       },
-      "conditions": "Only with complete scenario coverage, reliable counting recognition and checked packaging exceptions."
+      "observation": "На {t} с кассир передаёт клиенту наличные; пересчёт именно этой части денег на счётной машинке до передачи не наблюдался.",
+      "conditions": "Пересчёт засчитывается, если пачка пробыла в машинке не менее 1 с и рука кассира была у машинки до и после. Ручной полистный пересчёт не распознаётся."
+    },
+    {
+      "id": "cash_stored_without_count",
+      "title": "Приём наличных без пересчёта",
+      "kind": "action",
+      "source_status": "verified",
+      "required_capabilities": [
+        "cash_counted"
+      ],
+      "engine": {
+        "type": "without_prior",
+        "closing_event": "cash_entered_storage_area",
+        "prior_events": [
+          "cash_counted"
+        ],
+        "same_object": false,
+        "same_session": true
+      },
+      "document": {
+        "title": "Правила осуществления кассовых операций и операций по инкассации банкнот, монет и ценностей, постановление Правления НБРК от 29.11.2019 № 231",
+        "url": "https://adilet.zan.kz/rus/docs/V1900019680",
+        "clause": "пункт 19 подпункт 2 (приём банкнот с полистным пересчётом) и пункт 20 (приём и пересчёт в присутствии клиента)"
+      },
+      "observation": "На {t} с наличные перемещаются в зону хранения; пересчёт на счётной машинке до этого не наблюдался.",
+      "conditions": "Проверяется для каждого перемещения денег в хранилище отдельно, в рамках той же сессии обслуживания."
     }
   ]
 }

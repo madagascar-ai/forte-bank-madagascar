@@ -112,6 +112,8 @@ def validate_candidates(
                 )
         elif engine.get("type") == "event":
             supported = any(event.type == engine["event_type"] for event in events)
+        elif engine.get("type") == "without_prior":
+            supported = any(event.type == engine["closing_event"] for event in events)
         elif engine.get("type") == "before_event":
             supported = all(journal.coverage.get(flag) for flag in engine.get("required_context_flags", []))
         if not supported:

@@ -152,8 +152,13 @@ def run_pipeline(
     for candidate in accepted:
         rule = rule_map[candidate.rule_id]
         document = rule.document
+        observed = (
+            rule.observation.replace("{t}", f"{candidate.timecode_sec:.1f}")
+            if rule.observation
+            else candidate.reasoning
+        )
         description = (
-            candidate.reasoning + f" Основание для проверки: {document.get('title', '')}; "
+            observed + f" Основание для проверки: {document.get('title', '')}; "
             f"{document.get('clause', '')}."
         )
         if rule.source_status != "verified":

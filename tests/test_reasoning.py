@@ -1,4 +1,4 @@
-from forte_guard.contracts import Action, ActionJournal, Candidate, Frame
+from forte_guard.contracts import Action, ActionJournal, Candidate, Frame, Rule
 from forte_guard.reasoning.catalog import load_catalog
 from forte_guard.reasoning.rules import rule_candidates
 from forte_guard.reasoning.validation import merge_candidates, validate_candidates
@@ -19,8 +19,22 @@ def action(event_id, kind, batch, start, end):
 
 
 def omission_fixture(settings):
-    rules, _ = load_catalog(settings.config_dir)
-    rule = next(rule for rule in rules if rule.kind == "omission").model_copy(update={"enabled": True})
+    # The strict before_event engine stays supported for full-scenario omissions.
+    rule = Rule(
+        id="strict_payout_count",
+        title="Не наблюдался пересчёт выдаваемой части денег",
+        kind="omission",
+        required_capabilities=["cash_counted"],
+        engine={
+            "type": "before_event",
+            "required_event": "cash_counted",
+            "closing_event": "cash_transferred",
+            "closing_attributes": {"to_role": "client"},
+            "same_object": True,
+            "required_context_flags": ["packaging_exceptions_checked"],
+        },
+        document={"title": "Правила НБРК № 231", "clause": "пункт 31 подпункт 4"},
+    )
     journal = ActionJournal(
         duration_sec=10,
         sample_fps=5,

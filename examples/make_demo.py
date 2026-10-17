@@ -9,7 +9,7 @@ from forte_guard.contracts import Box, Detection, ObjectFrame, ObjectJournal, Zo
 from forte_guard.storage import write_json
 
 
-def create_demo(output: Path, disappear: bool = False):
+def create_demo(output: Path, disappear: bool = False, show_document: bool = True):
     output.mkdir(parents=True, exist_ok=True)
     profile = ZoneProfile(
         source="synthetic",
@@ -45,9 +45,16 @@ def create_demo(output: Path, disappear: bool = False):
         else:
             money = detection("batch1", "money", [0.48, 0.53, 0.52, 0.57])
             hands = []
+        extras = []
+        if show_document and timestamp < 0.8:
+            # The client shows an identity card before handing over cash (Rules No. 231, p. 19.1).
+            extras = [
+                detection("id1", "document", [0.62, 0.30, 0.66, 0.34]),
+                detection("hand_client_doc", "hand", [0.62, 0.30, 0.66, 0.34]),
+            ]
         records.append(
             ObjectFrame(
-                frame_id=f"f{index:06d}", timestamp_sec=timestamp, detections=[*people, money, *hands]
+                frame_id=f"f{index:06d}", timestamp_sec=timestamp, detections=[*people, money, *hands, *extras]
             )
         )
     journal = ObjectJournal(

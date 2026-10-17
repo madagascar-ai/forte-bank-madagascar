@@ -92,6 +92,51 @@ def rule_candidates(journal: ActionJournal, rules: list[Rule], scenarios: dict) 
                         "Наблюдаемые состояния пересекаются в одном интервале обслуживания.",
                     )
                 )
+        elif kind == "without_prior":
+            # Conservative omission: every closing action is checked on its own (not just the
+            # first in the clip), and a prior step only counts for it if the engine says so via
+            # same_object (same tracked item) or same_session (same client interaction) — an
+            # earlier client's count or document check must not excuse a later client's omission.
+            for closing in journal.actions:
+                if closing.type != engine["closing_event"]:
+                    continue
+                if closing.confidence < engine.get("min_confidence", 0.0):
+                    continue
+                if any(
+                    closing.attributes.get(key) != value
+                    for key, value in engine.get("closing_attributes", {}).items()
+                ):
+                    continue
+                prior = [
+                    event
+                    for event in journal.actions
+                    if event.type in engine["prior_events"]
+                    and event.start_sec <= closing.end_sec
+                    and (
+                        not engine.get("same_object")
+                        or bool(set(event.object_ids) & set(closing.object_ids))
+                    )
+                    and (
+                        not engine.get("same_session")
+                        or event.session_id == closing.session_id
+                    )
+                    and all(
+                        event.attributes.get(key) == value
+                        for key, value in engine.get("prior_attributes", {}).items()
+                    )
+                ]
+                if not prior:
+                    found.append(
+                        _candidate(
+                            rule,
+                            [closing],
+                            [],
+                            closing.start_sec,
+                            closing.end_sec,
+                            closing.end_sec,
+                            "Обязательное предшествующее действие до этого момента не наблюдалось.",
+                        )
+                    )
         elif kind == "before_event":
             # An omission requires a complete, visible scenario AND checked exceptions.
             if not journal.coverage.get("scenario_start_observed") or not journal.coverage.get(
@@ -131,4 +176,20 @@ def rule_candidates(journal: ActionJournal, rules: list[Rule], scenarios: dict) 
                             "Окно обязательного шага закрыто; шаг не наблюдался при подтверждённом покрытии.",
                         )
                     )
-    return found
+    return _drop_superseded(found, rules)
+
+
+def _drop_superseded(found: list[Candidate], rules: list[Rule]) -> list[Candidate]:
+    """A more specific rule wins over a general one for the same moment (one event, one type)."""
+    exclusive = {rule.id: set(rule.engine.get("exclusive_with", [])) for rule in rules}
+    kept = []
+    for item in found:
+        stronger = exclusive.get(item.rule_id, set())
+        if any(
+            other.rule_id in stronger
+            and max(other.start_sec, item.start_sec) <= min(other.end_sec, item.end_sec) + 1.0
+            for other in found
+        ):
+            continue
+        kept.append(item)
+    return kept
