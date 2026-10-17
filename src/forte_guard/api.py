@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -26,6 +27,7 @@ from .settings import Settings
 from .storage import JobStore, MaintenanceError
 
 logger = logging.getLogger("forte_guard")
+UI_COOKIE = "forte_ui"
 JOB_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 FRAME_PATTERN = re.compile(r"^f[0-9]{6}$")
 ARTIFACTS = {
@@ -63,8 +65,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.executor = executor
 
+    allowed = {ip_address(value) for value in ["127.0.0.1", "::1", *settings.allowed_clients]}
     if settings.allowed_clients:
-        allowed = {ip_address(value) for value in ["127.0.0.1", "::1", *settings.allowed_clients]}
 
         @app.middleware("http")
         async def restrict_clients(request: Request, call_next):
@@ -76,9 +78,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return JSONResponse({"detail": "Доступ с этого устройства не разрешён"}, status_code=403)
             return await call_next(request)
 
-    def require_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+    # The browser session is derived from the API key, so rotating the key also revokes it,
+    # and the key itself never reaches the page.
+    ui_token = hmac.new(settings.api_key.encode(), b"forte-guard-ui-v1", "sha256").hexdigest()
+
+    def ui_allowed(request: Request) -> bool:
+        if settings.web_access == "open":
+            return True
+        if settings.web_access == "trusted_clients":
+            return request.client is not None and ip_address(request.client.host) in allowed
+        return False
+
+    def ui_session(request: Request) -> bool:
+        cookie = request.cookies.get(UI_COOKIE, "")
+        return ui_allowed(request) and hmac.compare_digest(cookie.encode(), ui_token.encode())
+
+    def require_key(request: Request, x_api_key: str | None = Header(default=None, alias="X-API-Key")):
+        if x_api_key is None and ui_session(request):
+            # SameSite=Strict already blocks cross-site use; also reject foreign origins explicitly.
+            origin = request.headers.get("origin")
+            if request.method not in {"GET", "HEAD", "OPTIONS"} and origin:
+                parsed = urlparse(origin)
+                if parsed.scheme not in {"http", "https"} or parsed.netloc != request.headers.get("host"):
+                    raise HTTPException(403, "Запрос должен исходить из интерфейса сервиса")
+            return
+        if x_api_key is None and settings.web_access == "trusted_clients" and not ui_allowed(request):
+            raise HTTPException(403, "Доступ с этого устройства не разрешён")
         if x_api_key is None or not hmac.compare_digest(x_api_key.encode(), settings.api_key.encode()):
             raise HTTPException(401, "Неверный или отсутствующий X-API-Key")
+
+    @app.get("/api/v1/access")
+    def access(request: Request):
+        return {"mode": settings.web_access, "authorized": ui_session(request)}
 
     def get_job(job_id):
         if not JOB_PATTERN.fullmatch(job_id):
@@ -289,8 +320,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/assets", StaticFiles(directory=web), name="assets")
 
     @app.get("/", include_in_schema=False)
-    def index():
-        return FileResponse(
+    def index(request: Request):
+        response = FileResponse(
             web / "index.html",
             headers={
                 "Content-Security-Policy": "default-src 'self'; img-src 'self' data: blob:; "
@@ -299,5 +330,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Referrer-Policy": "no-referrer",
             },
         )
+        if ui_allowed(request):
+            response.set_cookie(
+                UI_COOKIE,
+                ui_token,
+                httponly=True,
+                samesite="strict",
+                secure=request.url.scheme == "https",
+                max_age=7 * 24 * 3600,
+            )
+        return response
 
     return app

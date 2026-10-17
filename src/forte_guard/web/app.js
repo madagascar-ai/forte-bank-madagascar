@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const S = {
   key: "",
+  connected: false,
   job: null,
   file: null,
   result: null,
@@ -56,7 +57,7 @@ function clock(seconds) {
 }
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
-  headers.set("X-API-Key", S.key);
+  if (S.key) headers.set("X-API-Key", S.key);
   const r = await fetch(path, { ...options, headers });
   if (!r.ok) {
     let message = "Ошибка " + r.status;
@@ -72,7 +73,7 @@ async function json(path, options) {
   return (await api(path, options)).json();
 }
 async function history() {
-  if (!S.key) return;
+  if (!S.connected) return;
   const d = await json("/api/v1/jobs");
   $("history").replaceChildren(
     ...d.jobs.map((j) => {
@@ -96,6 +97,7 @@ $("connect").onclick = async () => {
   S.key = $("api-key").value.trim();
   try {
     await json("/api/v1/config");
+    S.connected = true;
     $("connection-status").textContent = "Подключено";
     await history();
   } catch (e) {
@@ -223,8 +225,8 @@ $("clear-zones").onclick = () => {
 };
 $("upload-form").onsubmit = async (e) => {
   e.preventDefault();
-  S.key = $("api-key").value.trim();
-  if (!S.key) {
+  if (!S.connected) S.key = $("api-key").value.trim();
+  if (!S.connected && !S.key) {
     $("connection-status").textContent = "Введите ключ доступа";
     $("api-key").focus();
     return;
@@ -581,4 +583,18 @@ fetch("/health")
   })
   .catch(() => {
     $("server-status").textContent = "Сервис недоступен";
+  });
+
+json("/api/v1/access")
+  .then(async (access) => {
+    if (access.authorized) {
+      S.connected = true;
+      await history();
+    } else {
+      show("connection-panel");
+    }
+  })
+  .catch((error) => {
+    show("connection-panel");
+    $("connection-status").textContent = error.message;
   });

@@ -61,6 +61,9 @@ class Settings:
     max_video_sec: float = 180
     detection_confidence: float = 0.20
     image_size: int = 640
+    # api_key: the UI asks for the key; open (explicit opt-in): opening the page authorizes the
+    # browser; trusted_clients: only FORTE_ALLOWED_CLIENTS get the browser session.
+    web_access: str = field(default_factory=lambda: os.getenv("FORTE_WEB_ACCESS", "api_key"))
     inference_batch: int = 8
     allowed_clients: list[str] = field(
         default_factory=lambda: [
@@ -84,3 +87,7 @@ class Settings:
             raise ValueError("Job timeout must be positive")
         # Exact addresses only: a typo must never expand access to an entire subnet.
         self.allowed_clients = [str(ip_address(value)) for value in self.allowed_clients]
+        if self.web_access not in {"api_key", "open", "trusted_clients"}:
+            raise ValueError("FORTE_WEB_ACCESS must be api_key, open or trusted_clients")
+        if self.web_access == "trusted_clients" and not self.allowed_clients:
+            raise ValueError("Trusted web access requires an explicit FORTE_ALLOWED_CLIENTS list")
