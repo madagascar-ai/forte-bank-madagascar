@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from .contracts import ZoneProfile
 from .pipeline import run_pipeline
+from .readiness import inspect_readiness
 from .settings import Settings
 from .storage import JobStore
 
@@ -161,6 +162,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await file.close()
         return {"job_id": job_id, "status": "processing"}
+
+    @app.get("/api/v1/readiness", dependencies=[Depends(require_key)])
+    def readiness():
+        report = inspect_readiness(settings)
+        return JSONResponse(report, status_code=200 if report["status"] == "ready" else 503)
 
     @app.get("/api/v1/jobs", dependencies=[Depends(require_key)])
     def jobs():
