@@ -215,6 +215,71 @@ def test_personal_item_left_at_workstation_without_a_handoff_is_still_flagged():
     assert any(state.value is True for state in _workstation_states(journal, "personal_item"))
 
 
+COUNTER = ("ctr", "counter", [0.3, 0.1, 0.5, 0.3])
+# A seated cashier reaching her arm toward the machine: her box edge overlaps the counter box even
+# though her box CENTER (torso) stays well to the left of it.
+CASHIER_REACHING = ("cashier", "person", [0.05, 0.15, 0.32, 0.5])
+# Inside cashier_area, but clearly clear of the counter box — isolates the gap/fragmentation logic
+# from the pre-existing box-overlap counting method, which keys off money overlapping the counter.
+MONEY_NEAR_COUNTER = [0.15, 0.15, 0.20, 0.25]
+
+
+def _cash_counted(journal):
+    return [event for event in journal.actions if event.type == "cash_counted"]
+
+
+def _fragmented(journal):
+    return [event for event in journal.actions if event.type == "cash_retrieved_in_pieces"]
+
+
+def test_money_lost_near_the_machine_infers_a_count_without_box_overlap():
+    # The money box never overlaps the counter box (occlusion at the slot when fed in by hand), but
+    # it vanishes for a long stretch while the cashier keeps reaching for the machine — infer a
+    # counting episode from the gap itself, alongside (not instead of) the box-overlap method.
+    frames = (
+        [[CLIENT, CASHIER_REACHING, COUNTER, ("m1", "money", MONEY_NEAR_COUNTER)] for _ in range(3)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER] for _ in range(20)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER, ("m2", "money", MONEY_NEAR_COUNTER)] for _ in range(5)]
+    )
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 6, 5)
+    counted = _cash_counted(journal)
+    assert len(counted) == 1 and counted[0].attributes["method"] == "track_gap_near_machine"
+    assert _fragmented(journal) == []
+
+
+def test_two_pieces_in_quick_succession_after_counting_is_flagged():
+    # First piece settles, then a second, differently-tracked piece shows up with only a short gap
+    # before merging in — e.g. a note sorted out separately then put back with the rest.
+    frames = (
+        [[CLIENT, CASHIER_REACHING, COUNTER, ("m1", "money", MONEY_NEAR_COUNTER)] for _ in range(3)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER] for _ in range(20)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER, ("m2", "money", MONEY_NEAR_COUNTER)] for _ in range(5)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER] for _ in range(2)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER, ("m3", "money", MONEY_NEAR_COUNTER)] for _ in range(5)]
+    )
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 7, 5)
+    fragmented = _fragmented(journal)
+    assert len(fragmented) == 1
+    assert set(fragmented[0].object_ids) == {"m2", "m3"}
+
+
+def test_a_long_gap_between_pieces_is_not_treated_as_a_split():
+    # A gap long enough to be its own counting episode (not a quick hand-off) must not count as a
+    # split — only short gaps right after counting are the suspicious pattern.
+    frames = (
+        [[CLIENT, CASHIER_REACHING, COUNTER, ("m1", "money", MONEY_NEAR_COUNTER)] for _ in range(3)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER] for _ in range(20)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER, ("m2", "money", MONEY_NEAR_COUNTER)] for _ in range(5)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER] for _ in range(15)]
+        + [[CLIENT, CASHIER_REACHING, COUNTER, ("m3", "money", MONEY_NEAR_COUNTER)] for _ in range(5)]
+    )
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 9, 5)
+    assert _fragmented(journal) == []
+
+
 CASHIER = ("cashier", "person", SEATED)
 STACK_AT_CASHIER = ("stack", "money", [0.28, 0.45, 0.33, 0.5])
 STACK_AT_CLIENT = ("stack", "money", [0.66, 0.45, 0.71, 0.5])

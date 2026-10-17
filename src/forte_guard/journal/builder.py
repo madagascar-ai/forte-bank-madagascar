@@ -23,6 +23,23 @@ LABEL_ALIASES = {
 # hand class) near the machine for most of that dwell.
 COUNT_MIN_SEC = 1.0
 COUNT_PRESENCE_RATIO = 0.9
+# Fallback counting signal: the detector often loses the money box entirely right at the moment
+# it is fed into or pulled out of the machine (occlusion by the hand at the slot, no overlap with
+# the counter box ever gets recorded). If money vanishes for a while and the cashier stays at the
+# machine the whole time, infer a counting episode even without a single overlapping box. This
+# runs alongside the box-overlap check above, not instead of it — whichever evidence the detector
+# actually produced on a given clip is the one that fires.
+GAP_COUNT_MIN_SEC = 3.0
+GAP_COUNT_MAX_SEC = 20.0
+GAP_COUNT_NEAR_RATIO = 0.8
+# After a counting episode (either signal above), the detector sometimes re-identifies the
+# retrieved cash as a quick succession of different track ids before the pile settles — e.g. a
+# cashier pulling out a flagged note separately from the rest, then merging them back into one
+# stack. A single long gap is normal re-identification noise; several SHORT gaps in a row right
+# after counting is the distinguishing pattern. Weak geometric proxy: needs_review, not proof.
+FRAGMENT_WINDOW_SEC = 10.0
+FRAGMENT_GAP_MAX_SEC = 2.0
+FRAGMENT_MIN_PIECES = 2
 # A cash track that changes side within this window counts as handed over.
 HANDOFF_WINDOW_SEC = 4.0
 # Objects that should not stay at the cashier's workstation (or only while she is there).
@@ -47,6 +64,18 @@ def _overlaps(inner: Detection, outer: Detection, margin: float = 0.03) -> bool:
     return (
         outer.box.x1 - margin <= x <= outer.box.x2 + margin
         and outer.box.y1 - margin <= y <= outer.box.y2 + margin
+    )
+
+
+def _boxes_overlap(a: Detection, b: Detection, margin: float = 0.0) -> bool:
+    # True rectangle intersection, unlike _overlaps (center-of-one-box-in-the-other). A seated
+    # cashier's box includes her outstretched arm even when her torso center sits elsewhere, so
+    # this is the one that actually notices her reaching for the machine.
+    return (
+        a.box.x1 - margin < b.box.x2
+        and a.box.x2 + margin > b.box.x1
+        and a.box.y1 - margin < b.box.y2
+        and a.box.y2 + margin > b.box.y1
     )
 
 
@@ -246,6 +275,7 @@ def build_journal(
         "safe_key_in_lock",
         "extra_person_present",
         "cash_counted",
+        "cash_retrieved_in_pieces",
     ]
     required = max(1, math.ceil(fps * 0.4))
     smoothers = defaultdict(lambda: StableValue(required))
@@ -263,6 +293,9 @@ def build_journal(
     emitted_device_contacts = set()
     last_observed = {}
     client_zone_seen: dict[str, float] = {}
+    gap_counting: dict | None = None  # current money-absence stretch near the machine
+    last_money_near_machine_time: float | None = None
+    fragment_window: dict | None = None  # tracks quick successive track ids right after counting
     first_seen: dict[str, float] = {}
     session_started: dict[str, float] = {}
     session_order: list[str] = []
@@ -469,7 +502,58 @@ def build_journal(
                 counted.evidence_frame_ids = list(
                     dict.fromkeys([counting["frame"].frame_id, counting["last_frame"].frame_id])
                 )
+                fragment_window = {
+                    "start": frame.timestamp_sec,
+                    "deadline": frame.timestamp_sec + FRAGMENT_WINDOW_SEC,
+                    "last_track": None,
+                    "last_seen": frame.timestamp_sec,
+                    "pieces": set(),
+                    "object_ids": set(),
+                }
             counting = None
+
+        money_near_machine = any(
+            zone_of(m, profile) in {"counter_area", "cashier_area"} or any(_overlaps(m, c, 0.08) for c in counters)
+            for m in money_items
+        )
+        # The box-overlap check above (cashier_near_machine) needs the cashier's box CENTER near
+        # the machine; reaching an arm out while seated doesn't move her center, only her box edge.
+        cashier_reaching_machine = any(_boxes_overlap(p, c, 0.04) for p in cashier_people for c in counters)
+        if money_items:
+            if gap_counting is not None:
+                gap_duration = frame.timestamp_sec - gap_counting["start"]
+                gap_ratio = gap_counting["near"] / gap_counting["samples"] if gap_counting["samples"] else 0.0
+                if (
+                    money_near_machine
+                    and GAP_COUNT_MIN_SEC <= gap_duration <= GAP_COUNT_MAX_SEC
+                    and gap_ratio >= GAP_COUNT_NEAR_RATIO
+                ):
+                    event(
+                        "cash_counted",
+                        frame,
+                        [key for key, role in roles.items() if role == "cashier"],
+                        [m.track_id for m in money_items],
+                        attributes={"method": "track_gap_near_machine", "inferred": True},
+                        confidence=0.45,
+                        start=gap_counting["start"],
+                        visibility="uncertain",
+                    )
+                    fragment_window = {
+                        "start": frame.timestamp_sec,
+                        "deadline": frame.timestamp_sec + FRAGMENT_WINDOW_SEC,
+                        "last_track": None,
+                        "last_seen": frame.timestamp_sec,
+                        "pieces": set(),
+                        "object_ids": set(),
+                    }
+                gap_counting = None
+            if money_near_machine:
+                last_money_near_machine_time = frame.timestamp_sec
+        elif last_money_near_machine_time is not None and counting is None:
+            if gap_counting is None:
+                gap_counting = {"start": last_money_near_machine_time, "samples": 0, "near": 0}
+            gap_counting["samples"] += 1
+            gap_counting["near"] += int(cashier_reaching_machine)
 
         others = [p for p in people if roles.get(p.track_id) != "cashier"]
         state("extra_person_present", True if len(others) >= 2 else None, frame)
@@ -597,6 +681,37 @@ def build_journal(
                     confidence=item.confidence,
                 )
             locations[item.track_id] = location
+            if fragment_window is not None:
+                # repair_tracks() stitches a money track broken by a short gap back into one id —
+                # exactly the case this is trying to catch. raw_track_id still names the original,
+                # pre-stitch piece, so fragmentation is judged on that identity, not the repaired one.
+                piece_id = item.attributes.get("raw_track_id", item.track_id)
+                if frame.timestamp_sec > fragment_window["deadline"]:
+                    fragment_window = None
+                elif location in {"counter_area", "cashier_area"}:
+                    if piece_id != fragment_window["last_track"]:
+                        gap = frame.timestamp_sec - fragment_window["last_seen"]
+                        if gap <= FRAGMENT_GAP_MAX_SEC:
+                            fragment_window["pieces"].add(piece_id)
+                            fragment_window["object_ids"].add(piece_id)
+                            if len(fragment_window["pieces"]) >= FRAGMENT_MIN_PIECES:
+                                event(
+                                    "cash_retrieved_in_pieces",
+                                    frame,
+                                    [key for key, role in roles.items() if role == "cashier"],
+                                    sorted(fragment_window["object_ids"]),
+                                    attributes={"method": "track_fragmentation"},
+                                    confidence=0.4,
+                                    start=fragment_window["start"],
+                                    visibility="uncertain",
+                                )
+                                fragment_window = None
+                        else:
+                            fragment_window = None
+                    if fragment_window is not None:
+                        fragment_window["object_ids"].add(piece_id)
+                        fragment_window["last_track"] = piece_id
+                        fragment_window["last_seen"] = frame.timestamp_sec
 
     # A stack handed over the counter is often seen on the client's side for a single sample before the
     # client's hand hides it, so the smoothed side never flips. The track ending there is the handover.
