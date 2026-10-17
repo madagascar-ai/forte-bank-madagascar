@@ -449,7 +449,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     web = Path(__file__).parent / "web"
     app.mount("/assets", StaticFiles(directory=web), name="assets")
 
-    def page(request: Request, guest: bool):
+    @app.get("/", include_in_schema=False)
+    def index(request: Request):
         response = FileResponse(
             web / "index.html",
             headers={
@@ -468,7 +469,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 secure=request.url.scheme == "https",
                 max_age=7 * 24 * 3600,
             )
-        if guest and settings.web_access == "guest" and guest_id(request) is None:
+        if settings.web_access == "guest" and guest_id(request) is None:
             guest = uuid.uuid4().hex
             response.set_cookie(
                 GUEST_COOKIE,
@@ -481,15 +482,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 max_age=30 * 24 * 3600,
             )
         return response
-
-    @app.get("/", include_in_schema=False)
-    def index(request: Request):
-        return page(request, guest=True)
-
-    # Team page on the same deployment: asks for the key and shows the shared queue and history.
-    @app.get("/dev", include_in_schema=False)
-    @app.get("/dev/", include_in_schema=False)
-    def dev(request: Request):
-        return page(request, guest=False)
 
     return app

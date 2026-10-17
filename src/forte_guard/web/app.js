@@ -1,8 +1,5 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-// /dev is the team page: key login, shared queue and history even when the site runs in guest mode.
-const DEV = location.pathname.replace(/\/+$/, "") === "/dev";
-if (DEV) document.querySelector(".brand").href = "/dev";
 const S = {
   key: "",
   connected: false,
@@ -507,7 +504,7 @@ $("download-json").onclick = () => {
 };
 json("/api/v1/access")
   .then(async (access) => {
-    if (access.guest && !DEV) {
+    if (access.guest) {
       // Public site (guest mode): no key and no history list; the shared queue is for the team copy.
       S.guest = true;
       S.connected = true;

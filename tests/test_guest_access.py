@@ -68,17 +68,3 @@ def test_guest_cookie_is_only_issued_in_guest_mode(settings):
         with TestClient(create_app(settings)) as client:
             assert "forte_guest" not in client.get("/").headers.get("set-cookie", "")
             assert "guest" not in client.get("/api/v1/access").json()
-
-
-def test_dev_page_is_the_team_view_on_the_same_site(settings, monkeypatch):
-    app, release = guest_app(settings, monkeypatch)
-    with TestClient(app) as client:
-        for path in ["/dev", "/dev/"]:
-            page = client.get(path)
-            assert page.status_code == 200 and "<html" in page.text
-            assert "forte_guest" not in page.headers.get("set-cookie", "")
-        # Without a key the team page grants nothing; with the key it sees the shared queue.
-        assert client.get("/api/v1/jobs").status_code == 401
-        client.post("/api/v1/analyze", files=VIDEO, headers={"X-API-Key": settings.api_key})
-        assert len(client.get("/api/v1/jobs", headers={"X-API-Key": settings.api_key}).json()["jobs"]) == 1
-        release.set()
