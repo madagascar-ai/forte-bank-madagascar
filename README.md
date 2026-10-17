@@ -93,6 +93,8 @@ curl http://127.0.0.1:8000/api/v1/jobs/<job_id> \
 
 ## Как работать втроём
 
+Быстрый старт участника: [CONTRIBUTING.md](CONTRIBUTING.md). Доступ к общему Mac, отдельные рабочие копии и план CI/CD: [командная разработка](docs/team-development.md).
+
 | Участник | Основные файлы | Контракт на выходе |
 | --- | --- | --- |
 | Vision | `src/forte_guard/vision/`, `config/detector.json`, `scripts/prepare_models.py` | `ObjectJournal` |
