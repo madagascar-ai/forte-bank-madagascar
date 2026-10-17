@@ -104,6 +104,7 @@ def test_summary_counts_failures_as_errors():
     s = summarize(items, 285)
     assert (s["processed"], s["TP"], s["failed"], s["TN"]) == (3, 1, 1, 1)
     assert s["recall"] == 0.5 and s["accuracy"] == 0.667
+    assert s["strict_recall"] == 0.5
     assert (s["located"], s["judge_yes"], s["over_time_limit"]) == (1, 1, 1)
 
 

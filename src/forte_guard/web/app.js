@@ -573,6 +573,7 @@ async function loadBenchmarks() {
       ...[
         [percent(s.accuracy), "Верный вердикт"],
         [percent(s.recall), `Найдено нарушений (${s.TP} из ${s.TP + s.FN})`],
+        [percent(s.strict_recall), "Найдено и таймкод в допуске"],
         [s.FP, "Ложных срабатываний"],
         [
           s.located_of ? `${s.located}/${s.located_of}` : "—",
@@ -608,6 +609,7 @@ async function loadBenchmarks() {
         "Модели",
         "Вердикт",
         "Recall",
+        "Строгий",
         "Ложные",
         "Таймкод",
         "Судья",
@@ -623,6 +625,7 @@ async function loadBenchmarks() {
           [r.config.model, r.config.llm_model || "без LLM"].join(" · "),
           percent(s.accuracy),
           percent(s.recall),
+          percent(s.strict_recall),
           s.FP,
           s.located_of ? `${s.located}/${s.located_of}` : "—",
           s.judged ? `${s.judge_yes}/${s.judged}` : "—",

@@ -217,6 +217,8 @@ def summarize(items: list[dict], timeout_sec: float) -> dict:
         # A failed or timed-out video counts as an error, as it does for the jury.
         "accuracy": ratio(tp + tn, len(done)),
         "recall": ratio(tp, len(positives)),
+        # Closer to how the jury reads K1+K2: the verdict is right and a timecode is within tolerance.
+        "strict_recall": ratio(sum(1 for item in located if item["score"]["located"]), len(positives)),
         "precision": ratio(tp, tp + fp),
         "specificity": ratio(tn, len(done) - len(positives)),
         "located": sum(1 for item in located if item["score"]["located"]),
