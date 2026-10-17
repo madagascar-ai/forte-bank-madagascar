@@ -59,7 +59,7 @@ def create_demo(output: Path, disappear: bool = False, show_document: bool = Tru
         )
     journal = ObjectJournal(
         backend="synthetic-replay",
-        supported_classes=["person", "hand", "money"],
+        supported_classes=["person", "hand", "money", "document"],
         frames=records,
         warnings=["Синтетический пример для проверки интеграции; не результат работы YOLO."],
     )

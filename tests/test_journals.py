@@ -162,3 +162,21 @@ def test_zone_presence_keeps_demo_behaviour(demo, tmp_path, settings):
     _, lost, lost_profile = create_demo(tmp_path / "occlusion", disappear=True)
     journal = build_journal(ObjectJournal.model_validate_json(lost.read_text()), lost_profile, 8, 5, presence="zone")
     assert _departures(journal) == []
+
+
+def test_two_simultaneous_clients_attribute_documents_to_the_right_session():
+    # No hand contact is available (no "hand" class on detector v1), so document_presented is
+    # session-scoped by nearest client instead. With a queue (two clients in client_area at once),
+    # each document must still land on the session of the client it's actually next to.
+    client_a = ("ca", "person", [0.62, 0.1, 0.72, 0.8])
+    client_b = ("cb", "person", [0.85, 0.1, 0.95, 0.8])
+    doc_a = ("doc_a", "document", [0.63, 0.3, 0.68, 0.34])
+    doc_b = ("doc_b", "document", [0.86, 0.3, 0.91, 0.34])
+    frames = [[client_a] if i < 10 else [client_a, client_b, doc_a, doc_b] for i in range(20)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 4, 5)
+    presented = {
+        event.object_ids[0]: event.session_id for event in journal.actions if event.type == "document_presented"
+    }
+    assert presented.get("doc_a") is not None and presented.get("doc_b") is not None
+    assert presented["doc_a"] != presented["doc_b"]

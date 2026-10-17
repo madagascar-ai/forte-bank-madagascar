@@ -61,7 +61,11 @@ def test_unattended_cash_yields_to_departure_during_service(settings):
     assert "cash_unattended" in found
 
 
-def counting_objects(hand_at_machine: bool, seconds_in_machine: float = 1.4):
+AT_DESK = [0.05, 0.1, 0.35, 0.8]  # cashier's seat, inside cashier_area but away from the machine
+AT_MACHINE = [0.28, 0.38, 0.44, 0.62]  # standing right at the counting machine
+
+
+def counting_objects(cashier_near_machine: bool, seconds_in_machine: float = 1.4):
     from forte_guard.contracts import Box, Detection, ObjectFrame
 
     def det(track, label, box):
@@ -70,15 +74,14 @@ def counting_objects(hand_at_machine: bool, seconds_in_machine: float = 1.4):
     frames = []
     for index in range(30):
         t = index / 5
+        cashier_box = AT_MACHINE if (cashier_near_machine and 0.4 <= t < 3.2) else AT_DESK
         items = [
-            det("cashier", "person", [0.05, 0.1, 0.35, 0.8]),
+            det("cashier", "person", cashier_box),
             det("client", "person", [0.65, 0.1, 0.95, 0.8]),
             det("machine", "counter", [0.30, 0.40, 0.42, 0.60]),
         ]
         if 1.0 <= t < 1.0 + seconds_in_machine:
             items.append(det("stack", "cash", [0.33, 0.45, 0.38, 0.52]))
-        if hand_at_machine and (0.4 <= t < 1.2 or 2.2 <= t < 3.2):
-            items.append(det("hand_c", "hand", [0.33, 0.50, 0.37, 0.55]))
         frames.append(ObjectFrame(frame_id=f"f{index:06d}", timestamp_sec=t, detections=items))
     return ObjectJournal(backend="synthetic", supported_classes=[], frames=frames)
 
@@ -95,18 +98,27 @@ def counting_profile():
     )
 
 
-def test_cash_in_machine_with_cashier_hand_is_counted():
-    journal = build_journal(counting_objects(hand_at_machine=True), counting_profile(), 6, 5)
+def test_cash_in_machine_with_cashier_nearby_is_counted():
+    journal = build_journal(counting_objects(cashier_near_machine=True), counting_profile(), 6, 5)
     counted = [e for e in journal.actions if e.type == "cash_counted"]
     assert len(counted) == 1 and counted[0].object_ids == ["stack"]
     assert "cash_counted" in journal.capabilities and "cash_counted" not in journal.unsupported_actions
 
 
-def test_cash_near_machine_without_hand_or_too_short_is_not_counted():
-    no_hand = build_journal(counting_objects(hand_at_machine=False), counting_profile(), 6, 5)
+def test_cash_near_machine_without_cashier_or_too_short_is_not_counted():
+    far = build_journal(counting_objects(cashier_near_machine=False), counting_profile(), 6, 5)
     brief = build_journal(counting_objects(True, seconds_in_machine=0.4), counting_profile(), 6, 5)
-    assert not [e for e in no_hand.actions if e.type == "cash_counted"]
+    assert not [e for e in far.actions if e.type == "cash_counted"]
     assert not [e for e in brief.actions if e.type == "cash_counted"]
+
+
+def test_cashier_present_in_zone_but_far_from_machine_is_not_counted():
+    # Regression: the cashier sits in cashier_area the whole clip (as on a long counter) — so
+    # cashier_present is True throughout — but never physically at the machine. Being "somewhere in
+    # the zone" must not be enough to count as a recount; only proximity to the machine itself does.
+    journal = build_journal(counting_objects(cashier_near_machine=False), counting_profile(), 6, 5)
+    assert any(s.name == "cashier_present" and s.value is True for s in journal.states)
+    assert not [e for e in journal.actions if e.type == "cash_counted"]
 
 
 def payout_journal(counted_object: str):

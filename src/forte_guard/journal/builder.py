@@ -19,9 +19,10 @@ LABEL_ALIASES = {
     "banknote counting machine": "counter",
 }
 # Counting is inferred from geometry, not from a model: cash stays inside the counting machine for
-# at least COUNT_MIN_SEC, and the cashier's hand is at the machine shortly before and after.
+# at least COUNT_MIN_SEC, with a cashier-role person (not a hand — the fine-tuned detector has no
+# hand class) near the machine for most of that dwell.
 COUNT_MIN_SEC = 1.0
-COUNT_HAND_WINDOW_SEC = 2.0
+COUNT_PRESENCE_RATIO = 0.9
 # Objects that should not stay at the cashier's workstation (or only while she is there).
 WORKSTATION_ITEMS = ("personal_item", "phone", "cash_bag", "stamp", "folder")
 WORKSTATION_ZONES = {"cashier_area", "counter_area"}
@@ -166,6 +167,19 @@ class ZonePresence:
         return previous, self.value
 
 
+def _nearest_session(point, clients: list[Detection], sessions: dict[str, str], fallback: str | None):
+    """Attribute a detection to whichever currently-visible client is physically closest.
+
+    A single frame-global `active_session` breaks when two clients are in frame at once (a queue);
+    this picks the session of the nearer one instead of whichever client happened to be last in the
+    detector's output order.
+    """
+    if not clients:
+        return fallback
+    nearest = min(clients, key=lambda p: math.dist(p.box.center, point))
+    return sessions.get(nearest.track_id, fallback)
+
+
 def _contact(money: Detection, hands: list[Detection], people: list[Detection]):
     owners = set()
     for hand in hands:
@@ -234,8 +248,7 @@ def build_journal(
     sessions: dict[str, str] = {}
     service_sessions: set[str] = set()
     batches: dict[str, Batch] = {}
-    holders = {}
-    last_known_holder = {}
+    last_known_side = {}
     locations = {}
     object_states = {}
     emitted_device_contacts = set()
@@ -243,9 +256,7 @@ def build_journal(
     first_seen: dict[str, float] = {}
     session_started: dict[str, float] = {}
     session_order: list[str] = []
-    cashier_hand_at_counter: list[float] = []
     counting: dict | None = None  # current stay of cash inside the machine
-    pending_counts: list[dict] = []
     frame_times = [frame.timestamp_sec for frame in objects.frames]
     journal.coverage = {
         "first_frame_sec": frame_times[0] if frame_times else None,
@@ -266,6 +277,7 @@ def build_journal(
         confidence=0.6,
         start=None,
         visibility="clear",
+        session=None,
     ):
         action = Action(
             event_id=f"event_{len(journal.actions) + 1:06d}",
@@ -274,7 +286,7 @@ def build_journal(
             end_sec=frame.timestamp_sec,
             actor_ids=actor_ids or [],
             object_ids=object_ids or [],
-            session_id=active_session,
+            session_id=session if session is not None else active_session,
             evidence_frame_ids=[frame.frame_id],
             confidence=confidence,
             attributes=attributes or {},
@@ -322,7 +334,7 @@ def build_journal(
         for track_id in set(last_observed) - observed_ids:
             smoothers[(track_id, "state")].update(None)
             smoothers[(track_id, "owner")].update(None)
-            holders.pop(track_id, None)
+            smoothers[(track_id, "side")].update(None)
         clients = [
             p
             for p in people
@@ -411,45 +423,32 @@ def build_journal(
 
         counters = [d for d in frame.detections if d.label == "counter"]
         cashier_people = [p for p in people if roles.get(p.track_id) == "cashier"]
-        if counters and any(
-            any(_overlaps(h, c) for c in counters) and any(_overlaps(h, p, 0.08) for p in cashier_people)
-            for h in hands
-        ):
-            cashier_hand_at_counter.append(frame.timestamp_sec)
+        cashier_near_machine = any(_overlaps(p, c, margin=0.05) for p in cashier_people for c in counters)
         cash_in_machine = [m for m in money_items if any(_overlaps(m, c, 0.0) for c in counters)]
         if cash_in_machine:
             if counting is None:
-                counting = {"start": frame.timestamp_sec, "frame": frame, "objects": set()}
+                counting = {"start": frame.timestamp_sec, "frame": frame, "objects": set(), "samples": 0, "near": 0}
             counting["end"], counting["last_frame"] = frame.timestamp_sec, frame
             counting["objects"].update(m.track_id for m in cash_in_machine)
+            counting["samples"] += 1
+            counting["near"] += int(cashier_near_machine)
         elif counting is not None:
-            if counting["end"] - counting["start"] >= COUNT_MIN_SEC:
-                pending_counts.append(counting)
-            counting = None
-        for stay in list(pending_counts):
-            before = any(
-                stay["start"] - COUNT_HAND_WINDOW_SEC <= t <= stay["start"] + 0.5
-                for t in cashier_hand_at_counter
-            )
-            after = any(
-                stay["end"] - 0.5 <= t <= stay["end"] + COUNT_HAND_WINDOW_SEC for t in cashier_hand_at_counter
-            )
-            if before and after:
+            duration = counting["end"] - counting["start"]
+            presence_ratio = counting["near"] / counting["samples"] if counting["samples"] else 0.0
+            if duration >= COUNT_MIN_SEC and presence_ratio >= COUNT_PRESENCE_RATIO:
                 counted = event(
                     "cash_counted",
-                    stay["last_frame"],
+                    counting["last_frame"],
                     [key for key, role in roles.items() if role == "cashier"],
-                    sorted(stay["objects"]),
+                    sorted(counting["objects"]),
                     attributes={"method": "counting_machine"},
                     confidence=0.6,
-                    start=stay["start"],
+                    start=counting["start"],
                 )
                 counted.evidence_frame_ids = list(
-                    dict.fromkeys([stay["frame"].frame_id, stay["last_frame"].frame_id])
+                    dict.fromkeys([counting["frame"].frame_id, counting["last_frame"].frame_id])
                 )
-                pending_counts.remove(stay)
-            elif frame.timestamp_sec > stay["end"] + COUNT_HAND_WINDOW_SEC:
-                pending_counts.remove(stay)
+            counting = None
 
         others = [p for p in people if roles.get(p.track_id) != "cashier"]
         state("extra_person_present", True if len(others) >= 2 else None, frame)
@@ -482,46 +481,61 @@ def build_journal(
                         confidence=item.confidence,
                     )
                     object_states[item.track_id] = new_value
-            if item.label not in {"money", "phone", "document"}:
-                continue
-            owner = _contact(item, hands, people)
-            if item.label in {"phone", "document"}:
+            if item.label == "phone":
+                # Kept hand-based for now: the client-phone exclusion below needs a decision with the
+                # team before it's rewritten (no phone class on detector v1 either, so moot there).
+                owner = _contact(item, hands, people)
                 _, stable_owner = smoothers[(item.track_id, "owner")].update(owner)
                 contact_key = (item.track_id, stable_owner)
                 if stable_owner and contact_key not in emitted_device_contacts:
                     event(
-                        "device_used_observed" if item.label == "phone" else "document_presented",
+                        "device_used_observed",
                         frame,
                         [stable_owner],
                         [item.track_id],
-                        attributes={
-                            "object_type": item.label,
-                            "actor_role": roles.get(stable_owner, "unknown"),
-                        },
+                        attributes={"object_type": "phone", "actor_role": roles.get(stable_owner, "unknown")},
                         confidence=min(item.confidence, 0.7),
                         visibility="uncertain",
                     )
                     emitted_device_contacts.add(contact_key)
                 continue
+            if item.label == "document":
+                # No hand contact available: attribute to whichever client is nearest right now,
+                # not to "whoever's hand is on it" — session-scoped, not person-scoped.
+                nearest_session = _nearest_session(item.box.center, clients, sessions, active_session)
+                contact_key = (item.track_id, nearest_session)
+                if nearest_session and contact_key not in emitted_device_contacts:
+                    event(
+                        "document_presented",
+                        frame,
+                        [],
+                        [item.track_id],
+                        attributes={"object_type": "document"},
+                        confidence=min(item.confidence, 0.7),
+                        visibility="uncertain",
+                        session=nearest_session,
+                    )
+                    emitted_device_contacts.add(contact_key)
+                continue
+            if item.label != "money":
+                continue
             batch = batches.setdefault(item.track_id, Batch(batch_id=item.track_id))
-            _, stable_owner = smoothers[(item.track_id, "owner")].update(owner)
-            former = last_known_holder.get(item.track_id)
-            if stable_owner and former and stable_owner != former[0] and frame.timestamp_sec - former[1] <= 4:
-                from_role, to_role = roles.get(former[0], "unknown"), roles.get(stable_owner, "unknown")
+            location = zone_of(item, profile)
+            side = "client" if location == "client_area" else ("cashier" if location in {"cashier_area", "counter_area"} else None)
+            _, stable_side = smoothers[(item.track_id, "side")].update(side)
+            former = last_known_side.get(item.track_id)
+            if stable_side and former and stable_side != former[0] and frame.timestamp_sec - former[1] <= 4:
+                from_role, to_role = former[0], stable_side
                 action = event(
                     "cash_transferred",
                     frame,
-                    [former[0], stable_owner],
+                    [],
                     [item.track_id],
-                    {
-                        "from_actor": former[0],
-                        "to_actor": stable_owner,
-                        "from_role": from_role,
-                        "to_role": to_role,
-                    },
-                    confidence=min(item.confidence, 0.7),
+                    {"from_role": from_role, "to_role": to_role},
+                    confidence=min(item.confidence, 0.6),
                     start=former[1],
                     visibility="uncertain",
+                    session=_nearest_session(item.box.center, clients, sessions, active_session),
                 )
                 action.evidence_frame_ids = list(dict.fromkeys([former[2], frame.frame_id]))
                 if from_role == "client" and active_session:
@@ -529,15 +543,17 @@ def build_journal(
                     batch.provenance = "observed"
                     service_sessions.add(active_session)
                     state("service_active", True, frame, source_events=[action.event_id])
-            if stable_owner:
-                last_known_holder[item.track_id] = (stable_owner, frame.timestamp_sec, frame.frame_id)
-            location = zone_of(item, profile)
-            if location == "counter_area" and holders.get(item.track_id) and owner is None and contiguous:
+            if stable_side:
+                last_known_side[item.track_id] = (stable_side, frame.timestamp_sec, frame.frame_id)
+            if (
+                location == "counter_area"
+                and locations.get(item.track_id) not in {None, "counter_area"}
+                and contiguous
+            ):
                 event(
                     "cash_placed_on_counter",
                     frame,
-                    [holders[item.track_id]],
-                    [item.track_id],
+                    object_ids=[item.track_id],
                     confidence=min(item.confidence, 0.6),
                     visibility="uncertain",
                 )
@@ -553,13 +569,15 @@ def build_journal(
                     attributes={"storage_contents_unknown": True},
                     confidence=item.confidence,
                 )
-            holders[item.track_id] = stable_owner
             locations[item.track_id] = location
 
     journal.batches = list(batches.values())
     journal.actions.sort(key=lambda a: (a.start_sec, a.end_sec, a.event_id))
     journal.warnings.append(
-        "Пересчёт на счётной машинке распознаётся приближённо, по геометрии рук и купюр; "
-        "идентификация и состояние замка сейфа базовой геометрией не устанавливаются."
+        "Передача денег, пересчёт на машинке и показ документа определяются по зонам и сессии "
+        "клиента, без привязки к конкретной руке — на видео с несколькими клиентами одновременно "
+        "в кадре привязка может быть неточной. Потеря трека пачки денег при передаче из рук в руки "
+        "не восстанавливается. Идентификация и состояние замка сейфа базовой геометрией "
+        "не устанавливаются."
     )
     return journal
