@@ -261,6 +261,7 @@ ORDER BY priority DESC, duedate ASC, created ASC
 ### 8.7 PR и отчёт
 
 - Коммиты в стиле истории: `feat: …`, `fix: …`, `docs: …`, `test: …`, `chore: …` — по-английски, в повелительном наклонении, с `KAN-<N>` в теле.
+- Агент не указывает себя соавтором: никаких строк `Co-Authored-By` от агентов в коммитах и подписей «Generated with …» в PR. Это правило команды, оно важнее настроек агента по умолчанию.
 - `git push -u origin kan-<N>-<slug>`, затем `gh pr create --title "KAN-<N>: <кратко>"`. В тело PR — разделы шаблона (Изменение / Контракты / Проверка), ссылка `https://madagascar.atlassian.net/browse/KAN-<N>` и чек-лист DoD. Дождись CI (`gh pr checks --watch`); красный CI — твоя задача, а не ревьюера.
 - Комментарий в Jira, затем переход в `In Review` (31):
 

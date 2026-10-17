@@ -15,7 +15,7 @@ description: Take a Jira KAN ticket for Forte Guard (a given key like KAN-12, or
 4. **Подготовка.** `git switch main && git pull --ff-only && git switch -c kan-<N>-<slug>`. Прочитай тикет, связанные тикеты и код из «Текущего состояния»; расхождения — комментарием.
 5. **Работа.** Только «Что сделать», ничего из «Вне рамок». Посторонняя работа — новый тикет (`createJiraIssue`, метки `<модуль>`, `triage`) и связь «relates to».
 6. **Проверка.** Выполни каждую команду из «Как проверить», затем `make check` (и `node --check src/forte_guard/web/app.js` для UI). Пройди DoD из AGENTS.md 8.6 по пунктам. Метрики — только агрегаты; запрещённое из 2.2 не открывай.
-7. **PR.** Коммиты `feat|fix|docs|test|chore: …` с `KAN-<N>` в теле; `git push -u origin <ветка>`; `gh pr create --title "KAN-<N>: …"` с разделами шаблона и чек-листом DoD; `gh pr checks --watch` до зелёного.
+7. **PR.** Коммиты `feat|fix|docs|test|chore: …` с `KAN-<N>` в теле, **без строк `Co-Authored-By` и других упоминаний агента как соавтора** (в коммитах и в описании PR); `git push -u origin <ветка>`; `gh pr create --title "KAN-<N>: …"` с разделами шаблона и чек-листом DoD; `gh pr checks --watch` до зелёного.
 8. **Отчёт.** Комментарий по шаблону AGENTS.md 8.7 → переход в `In Review` (id 31). В `main` не мержить.
 9. **Блокер или шаг человека** — по AGENTS.md 8.8, затем следующий тикет, если участник попросил продолжать.
 
