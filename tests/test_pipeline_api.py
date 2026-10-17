@@ -128,11 +128,34 @@ def test_invalid_uploads_fail_without_processing(settings):
         )
 
 
-def test_restart_recovery_is_explicit(tmp_path):
+def test_restart_requeues_jobs_with_an_upload_and_fails_the_rest(tmp_path):
     store = JobStore(tmp_path)
-    store.create("a" * 32, "synthetic.mov")
+    store.create("a" * 32, "kept.mov")
+    store.folder("a" * 32).mkdir(parents=True, exist_ok=True)
+    (store.folder("a" * 32) / "input.mov").write_bytes(b"synthetic")
+    store.create("b" * 32, "lost.mov")
     assert JobStore(tmp_path).get("a" * 32)["status"] == "processing"
-    assert JobStore(tmp_path, recover=True).get("a" * 32)["status"] == "failed"
+    recovered = JobStore(tmp_path, recover=True)
+    assert recovered.interrupted == ["a" * 32]
+    assert recovered.get("a" * 32)["status"] == "processing"
+    assert recovered.get("a" * 32)["stage"] == "requeued"
+    assert recovered.get("b" * 32)["status"] == "failed"
+
+
+def test_app_resumes_jobs_interrupted_by_a_restart(settings, monkeypatch):
+    ran = []
+    monkeypatch.setattr("forte_guard.api.run_pipeline", lambda video, *args, **kwargs: ran.append(video))
+    store = JobStore(settings.data_dir)
+    store.create("c" * 32, "interrupted.mov")
+    store.folder("c" * 32).mkdir(parents=True, exist_ok=True)
+    (store.folder("c" * 32) / "input.mov").write_bytes(b"synthetic")
+    with TestClient(create_app(settings)):
+        for _ in range(50):
+            if JobStore(settings.data_dir).get("c" * 32)["status"] != "processing":
+                break
+            time.sleep(0.05)
+    assert ran and ran[0].name == "input.mov"
+    assert JobStore(settings.data_dir).get("c" * 32)["status"] == "done"
 
 
 def test_no_remote_ai_endpoint(settings):

@@ -228,6 +228,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.error("Job %s failed: %s", job_id, type(exc).__name__)
             store.update(job_id, "failed", 0, status="failed", error=error[:500])
 
+    # A restart (deploy or crash) must not lose uploads: resume them in their original order.
+    for job_id in sorted(store.interrupted, key=lambda job: store.get(job)["created_at"]):
+        executor.submit(worker, job_id)
+
     @app.get("/health")
     def health():
         return {

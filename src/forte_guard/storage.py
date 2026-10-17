@@ -36,11 +36,20 @@ class JobStore:
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS service_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
+            # Jobs a restart interrupted (deploy, crash) are resumed by the API, not lost: the upload is
+            # still on disk and the original created_at keeps the time limit honest.
+            self.interrupted: list[str] = []
             if recover:
-                conn.execute(
-                    "UPDATE jobs SET status='failed', stage='interrupted', error=? WHERE status='processing'",
-                    ("Сервис перезапущен во время обработки; загрузите видео повторно",),
-                )
+                rows = conn.execute("SELECT job_id FROM jobs WHERE status='processing'").fetchall()
+                for (job_id,) in rows:
+                    if (self.root / "jobs" / job_id / "input.mov").is_file():
+                        conn.execute("UPDATE jobs SET stage='requeued' WHERE job_id=?", (job_id,))
+                        self.interrupted.append(job_id)
+                    else:
+                        conn.execute(
+                            "UPDATE jobs SET status='failed', stage='interrupted', error=? WHERE job_id=?",
+                            ("Сервис перезапущен во время обработки; загрузите видео повторно", job_id),
+                        )
 
     def connect(self):
         return sqlite3.connect(self.db, timeout=15)

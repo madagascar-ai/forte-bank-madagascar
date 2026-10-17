@@ -6,6 +6,10 @@ madagascar-ai.team, www.madagascar-ai.team {
 	}
 	# The GPU machine (RTX 5090) on the team tailnet; the service listens only on this address.
 	reverse_proxy 100.118.149.106:8000 {
+		# A deploy restarts the service for a few seconds: keep retrying the connection instead of
+		# answering the jury with 502. Requests whose connection never opened are safe to retry.
+		lb_try_duration 30s
+		lb_try_interval 250ms
 		transport http {
 			read_timeout 10m
 			write_timeout 10m
