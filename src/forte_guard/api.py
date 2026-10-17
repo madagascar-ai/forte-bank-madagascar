@@ -274,6 +274,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "detector": settings.detector,
             "model": settings.model_path.name,
             "llm_model": settings.llm_model,
+            "zone_model": settings.zone_model,
             "llm_enabled": settings.llm_enabled,
             "auto_zones": settings.auto_zones,
             "client_access_restricted": bool(settings.allowed_clients),

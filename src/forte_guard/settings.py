@@ -2,13 +2,31 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from urllib.parse import urlparse
 
 
 def _bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).lower() in {"1", "true", "yes"}
+
+
+# Tailscale/CGNAT range: Python does not mark it private, but it never routes to the internet.
+_TEAM_NETWORK = ip_network("100.64.0.0/10")
+
+
+def is_team_llm_host(hostname: str | None) -> bool:
+    """Loopback, the Docker service, or a literal private/tailnet IP of a team-owned machine.
+
+    Hostnames are rejected on purpose: DNS could silently point them at a cloud endpoint.
+    """
+    if hostname in {"localhost", "ollama"}:
+        return True
+    try:
+        address = ip_address(hostname or "")
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address in _TEAM_NETWORK
 
 
 def load_env(path: Path = Path(".env")) -> None:
@@ -34,6 +52,10 @@ class Settings:
     auto_zones: bool = field(default_factory=lambda: _bool("FORTE_AUTO_ZONES", True))
     ollama_url: str = field(default_factory=lambda: os.getenv("FORTE_OLLAMA_URL", "http://127.0.0.1:11434"))
     llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma3:4b"))
+    # Automatic zones send a frame, so they need a vision-capable model; text-only LLMs cannot do it.
+    zone_model: str = field(
+        default_factory=lambda: os.getenv("FORTE_ZONE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma3:4b")
+    )
     job_timeout_sec: float = field(default_factory=lambda: float(os.getenv("FORTE_JOB_TIMEOUT_SEC", "285")))
     max_upload_mb: int = 256
     max_video_sec: float = 180
@@ -54,8 +76,10 @@ class Settings:
         if self.detector not in {"world", "yolo", "replay"}:
             raise ValueError("FORTE_DETECTOR must be world, yolo, or replay")
         url = urlparse(self.ollama_url)
-        if url.scheme != "http" or url.hostname not in {"localhost", "127.0.0.1", "::1", "ollama"}:
-            raise ValueError("Ollama must be local: localhost, loopback, or Docker service 'ollama'")
+        if url.scheme != "http" or not is_team_llm_host(url.hostname):
+            raise ValueError(
+                "Ollama must be local: loopback, Docker service 'ollama', or a private/tailnet IP"
+            )
         if self.job_timeout_sec <= 0:
             raise ValueError("Job timeout must be positive")
         # Exact addresses only: a typo must never expand access to an entire subnet.

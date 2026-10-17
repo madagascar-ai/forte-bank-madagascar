@@ -64,6 +64,7 @@ def run_pipeline(
             "detector": "replay" if replay else settings.detector,
             "model_path": settings.model_path.name,
             "llm_model": settings.llm_model,
+            "zone_model": settings.zone_model,
             "llm_enabled": settings.llm_enabled,
             "verification_mode": "structural_only",
             "labels_used": False,

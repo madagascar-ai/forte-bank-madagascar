@@ -20,6 +20,7 @@ def local_chat(
     images: list[Path] | None = None,
     max_seconds: float = 80,
     context_size: int = 16384,
+    model: str | None = None,
 ) -> dict:
     # Verify the URL here too: callers outside the web app cannot bypass locality.
     settings.validate()
@@ -31,10 +32,12 @@ def local_chat(
         response = client.post(
             settings.ollama_url.rstrip("/") + "/api/chat",
             json={
-                "model": settings.llm_model,
+                "model": model or settings.llm_model,
                 "messages": [message],
                 "format": schema,
                 "stream": False,
+                # Hybrid reasoning models (qwen3, gemma4) would otherwise spend the budget on thinking.
+                "think": False,
                 "keep_alive": "10m",
                 "options": {"temperature": 0, "seed": 42, "num_ctx": context_size, "num_predict": 1200},
             },
@@ -43,7 +46,9 @@ def local_chat(
         result = response.json()
     if result.get("done_reason") != "stop":
         raise ValueError("Local LLM response was truncated")
-    return json.loads(result["message"]["content"])
+    content = result["message"]["content"]
+    # Some templates leak reasoning ending in </think> even with think=false; keep only the answer.
+    return json.loads(content.rsplit("</think>", 1)[-1])
 
 
 def auto_zones(settings: Settings, frame: Frame, deadline: Deadline) -> ZoneProfile:
@@ -80,7 +85,9 @@ def auto_zones(settings: Settings, frame: Frame, deadline: Deadline) -> ZoneProf
         "only if a safe/storage opening is clearly visible. Different regions must not all cover "
         "the full image. Do not identify people. Omit regions that cannot be located. Return only JSON."
     )
-    result = local_chat(settings, prompt, schema, deadline, [Path(frame.image_path)], max_seconds=40)
+    result = local_chat(
+        settings, prompt, schema, deadline, [Path(frame.image_path)], max_seconds=40, model=settings.zone_model
+    )
     zones = [
         Zone(name=item["name"], box=Box(**{key: item[key] for key in ("x1", "y1", "x2", "y2")}))
         for item in result["zones"]

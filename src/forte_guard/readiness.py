@@ -60,23 +60,27 @@ def inspect_readiness(settings: Settings) -> dict:
     except OSError:
         check("storage", False, "Каталог задач недоступен для записи")
     if settings.llm_enabled:
-        try:
+
+        def capabilities_of(model: str) -> list[str]:
             with httpx.Client(trust_env=False, timeout=3) as client:
-                response = client.post(
-                    settings.ollama_url.rstrip("/") + "/api/show", json={"model": settings.llm_model}
-                )
+                response = client.post(settings.ollama_url.rstrip("/") + "/api/show", json={"model": model})
                 response.raise_for_status()
-                capabilities = response.json().get("capabilities", [])
+                return response.json().get("capabilities", [])
+
+        try:
+            capabilities = capabilities_of(settings.llm_model)
             check("local_llm", True, "Ollama и локальная модель доступны")
             if settings.auto_zones:
+                if settings.zone_model != settings.llm_model:
+                    capabilities = capabilities_of(settings.zone_model)
                 vision = "vision" in capabilities
                 check(
                     "vision_llm",
                     vision,
-                    "Изображения поддерживаются" if vision else "Автозонам нужна vision-модель",
+                    "Изображения поддерживаются" if vision else "Автозонам нужна vision-модель (FORTE_ZONE_MODEL)",
                 )
         except (httpx.HTTPError, ValueError):
-            check("local_llm", False, "Запустите Ollama и загрузите модель из FORTE_LLM_MODEL")
+            check("local_llm", False, "Запустите Ollama и загрузите модели из FORTE_LLM_MODEL/FORTE_ZONE_MODEL")
     else:
         check("local_llm", True, "Отключена настройкой FORTE_LLM_ENABLED")
     return {"status": "ready" if all(item["ready"] for item in checks) else "not_ready", "checks": checks}

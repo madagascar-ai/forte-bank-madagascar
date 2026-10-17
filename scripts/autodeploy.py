@@ -25,6 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import venv
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 
 REPO = "temirrrr/forte-bank-madagascar"
@@ -32,6 +33,17 @@ LABEL = "kz.forte-guard.autodeploy"
 DEFAULT_ROOT = Path.home() / "Library" / "Application Support" / "ForteGuard"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 LOG = logging.getLogger("forte-deploy")
+
+
+def team_llm_host(hostname):
+    # Mirrors forte_guard.settings.is_team_llm_host; this agent runs without the package installed.
+    if hostname in {"localhost", "ollama"}:
+        return True
+    try:
+        address = ip_address(hostname or "")
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_private or address in ip_network("100.64.0.0/10")
 
 
 def read_json(path, default=None):
@@ -361,8 +373,11 @@ class Agent:
             return
         url = env.get("FORTE_OLLAMA_URL", "http://127.0.0.1:11434")
         parsed = urllib.parse.urlparse(url)
-        if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        if parsed.scheme != "http" or not team_llm_host(parsed.hostname):
             raise ValueError("OllamaMustBeLocal")
+        if parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            # A team GPU server is run by its owner; the release preflight still requires it to be ready.
+            return
         try:
             request_json(url.rstrip("/") + "/api/tags", timeout=3)
             return
