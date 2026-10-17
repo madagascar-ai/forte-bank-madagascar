@@ -20,7 +20,7 @@
 На собственном компьютере достаточно Python 3.11+ и Git; для команд Makefile нужен `make` (macOS/Linux/WSL).
 
 ```bash
-git clone https://github.com/temirrrr/forte-bank-madagascar.git
+git clone https://github.com/madagascar-ai/forte-bank-madagascar.git
 cd forte-bank-madagascar
 git switch -c feat/my-change
 make setup

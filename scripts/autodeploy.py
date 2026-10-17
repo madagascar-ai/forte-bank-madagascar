@@ -28,7 +28,7 @@ import venv
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 
-REPO = "temirrrr/forte-bank-madagascar"
+REPO = "madagascar-ai/forte-bank-madagascar"
 LABEL = "kz.forte-guard.autodeploy"
 DEFAULT_ROOT = Path.home() / "Library" / "Application Support" / "ForteGuard"
 SHA = re.compile(r"^[0-9a-f]{40}$")

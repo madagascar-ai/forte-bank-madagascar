@@ -101,7 +101,7 @@ def test_latest_ci_run_supersedes_old_success():
         "head_sha": "a" * 40,
         "head_branch": "main",
         "event": "push",
-        "repository": {"full_name": "temirrrr/forte-bank-madagascar"},
+        "repository": {"full_name": "madagascar-ai/forte-bank-madagascar"},
     }
     client.get = lambda _: {
         "workflow_runs": [
