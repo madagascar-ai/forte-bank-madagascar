@@ -252,7 +252,6 @@ function table(headers, rows) {
 }
 async function renderSummary(result, id) {
   show("summary-intro", false);
-  show("summary-description-card", false);
   show("summary-observed-card", false);
   let summary;
   try {
@@ -264,10 +263,6 @@ async function renderSummary(result, id) {
   const observed = summary.observed || [];
   if (noViolation) {
     show("summary-intro", true);
-    if (summary.description) {
-      show("summary-description-card", true);
-      $("summary-description").textContent = summary.description;
-    }
     if (observed.length) {
       show("summary-observed-card", true);
       $("summary-observed").replaceChildren(...observed.map((text) => el("li", text)));

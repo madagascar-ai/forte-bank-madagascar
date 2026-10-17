@@ -19,7 +19,7 @@ from .contracts import (
 from .journal.builder import build_journal
 from .journal.zones import CORE_ZONES, estimate_zones
 from .reasoning.catalog import load_catalog
-from .reasoning.llm import auto_zones, llm_candidates, local_chat
+from .reasoning.llm import auto_zones, llm_candidates
 from .reasoning.rules import rule_candidates
 from .reasoning.validation import merge_candidates, validate_candidates
 from .settings import Settings
@@ -60,31 +60,6 @@ def _build_summary(journal: ActionJournal) -> dict:
         "observed": _observed_facts(journal),
         "notes": list(dict.fromkeys(journal.warnings)),
     }
-
-
-def _describe_video(settings: Settings, observed: list[str], deadline: Deadline) -> str | None:
-    # Prose layer over the same facts in "observed" — grounded by construction, not a free retelling:
-    # the model sees only this fact list, never frames, and is told not to add anything to it.
-    if not settings.llm_enabled or not observed:
-        return None
-    schema = {
-        "type": "object",
-        "properties": {"summary": {"type": "string"}},
-        "required": ["summary"],
-        "additionalProperties": False,
-    }
-    prompt = (
-        "Факты из журнала видео в кассе банка, без интерпретаций:\n"
-        + "\n".join(f"- {fact}" for fact in observed[:5])
-        + "\n\nСвяжи эти факты в одно связное предложение на русском языке, по существу, не добавляя "
-        'ничего, чего нет в списке, и без оценочных слов вроде "правильно" или "корректно" — '
-        "только то, что видно."
-    )
-    try:
-        result = local_chat(settings, prompt, schema, deadline, max_seconds=25)
-        return str(result.get("summary", "")).strip() or None
-    except Exception:
-        return None
 
 
 def _evidence(candidate, frame_map: dict[str, Frame]) -> list[Evidence]:
@@ -263,8 +238,6 @@ def run_pipeline(
     )
     deadline.remaining()
     write_json(output / "result.json", result)
-    summary = _build_summary(journal)
-    summary["description"] = _describe_video(settings, summary["observed"], deadline)
-    write_json(output / "summary.json", summary)
+    write_json(output / "summary.json", _build_summary(journal))
     progress("done", 1.0)
     return result
