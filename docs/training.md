@@ -72,3 +72,16 @@ FORTE_MODEL_PATH=data/runs/cashdesk/weights/best.pt
 ```
 
 Журнал пока использует имена `money` и `document`; соответствие `cash` и `id_card` им нужно добавить в `aliases` в `config/detector.json`. Метрики на проверочных роликах не доказывают устойчивость к другому ракурсу: проверьте на своих съёмках под другим углом.
+
+## Отбор кадров и обучение на 5090
+
+```bash
+# все ролики при 5 кадрах/с, то же деление на обучение и проверку
+cp data/training/split.json data/training/classes.txt data/training_5fps/
+.venv/bin/python scripts/prepare_dataset.py videos --out data/training_5fps --fps 5 --min-change 0
+
+# отбор N самых разных кадров (DINOv2 + косинус, локально); таблица покрытия помогает выбрать N
+.venv/bin/python scripts/select_diverse.py --budget 3000
+```
+
+Обучение на 5090: окружение `~/forte-train/venv` (PyTorch cu128, ultralytics), набор копируется `rsync` в `~/forte-train/data/`, запуск `scripts/train_detector.py --device 0`. Метрики на кадрах с черновыми рамками показывают согласие с черновиком, а не точность: для честной оценки проверочные ролики размечают люди.

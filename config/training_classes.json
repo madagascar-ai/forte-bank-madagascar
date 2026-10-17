@@ -1,18 +1,18 @@
 {
   "classes": [
-    {"name": "person", "prompts": ["person"]},
-    {"name": "cash", "prompts": ["stack of banknotes", "banknote"]},
-    {"name": "id_card", "prompts": ["identity card"]},
-    {"name": "cash_bag", "prompts": ["cash collection bag"]},
-    {"name": "counter", "prompts": ["banknote counting machine"]},
-    {"name": "stamp", "prompts": ["rubber stamp"]},
-    {"name": "folder", "prompts": ["document folder"]},
-    {"name": "safe_key", "prompts": ["key in a lock"]},
-    {"name": "personal_item", "prompts": ["jacket", "handbag", "coffee cup", ""]},
-    {"name": "door", "prompts": ["door"]},
-    {"name": "safe", "prompts": ["metal safe"]},
-    {"name": "laptop", "prompts": ["laptop", "personal computer"]},
-    {"name": "currency_detector", "prompts": ["counterfeit banknote detector"]}
+    {"name": "person", "prompts": ["person"], "description": "any person, whole visible body"},
+    {"name": "cash", "prompts": ["stack of banknotes", "banknote"], "description": "banknotes: one box per stack or fan of notes lying together; a separate single note gets its own box"},
+    {"name": "id_card", "prompts": ["identity card"], "description": "identity card or ID document, only when the document itself is visible (not hidden in a closed hand)"},
+    {"name": "cash_bag", "prompts": ["cash collection bag"], "description": "cash-in-transit collection bag or sealed money bag"},
+    {"name": "counter", "prompts": ["banknote counting machine"], "description": "banknote counting machine"},
+    {"name": "stamp", "prompts": ["rubber stamp"], "description": "rubber stamp or seal"},
+    {"name": "folder", "prompts": ["document folder"], "description": "document folder or file"},
+    {"name": "safe_key", "prompts": ["key in a lock"], "description": "key, especially a key inserted in the safe lock"},
+    {"name": "personal_item", "prompts": ["jacket", "handbag", "coffee cup", ""], "description": "personal belongings at the cashier workplace: jacket, bag, cup or glass; not clothes worn by a person"},
+    {"name": "door", "prompts": ["door"], "description": "door of the cash room, whole door whether open or closed"},
+    {"name": "safe", "prompts": ["metal safe"], "description": "safe, whole safe whether open or closed"},
+    {"name": "laptop", "prompts": ["laptop", "personal computer"], "description": "laptop or computer, whether on or off"},
+    {"name": "currency_detector", "prompts": ["counterfeit banknote detector"], "description": "banknote authenticity / counterfeit detector device, separate from the counting machine"}
   ],
-  "notes": "Order defines YOLO class ids; never reorder after labeling starts, only append. Prompts only draft labels for human correction. The detector finds door, safe and laptop in any camera angle; their open/closed and on/off states are judged separately on the detected crop."
+  "notes": "Order defines YOLO class ids; never reorder after labeling starts, only append. Prompts and descriptions only draft labels for human correction. The detector finds door, safe and laptop in any camera angle; their open/closed and on/off states are judged separately on the detected crop."
 }
