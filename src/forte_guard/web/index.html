@@ -90,6 +90,23 @@
           </div>
           <section id="tab-findings">
             <div id="findings"></div>
+            <div id="summary-intro" class="card hidden">
+              <p>
+                Включённые проверки не выявили признаков нарушения.
+                Результат — подсказка для проверки человеком.
+              </p>
+            </div>
+            <div id="summary-observed-card" class="card hidden">
+              <h3>Что видно на записи</h3>
+              <ul id="summary-observed"></ul>
+            </div>
+            <details id="summary-checks" class="card hidden">
+              <summary>Проверено / не проверялось</summary>
+              <h4>Проверено</h4>
+              <ul id="summary-performed"></ul>
+              <h4>Не проверялось</h4>
+              <ul id="summary-not-performed"></ul>
+            </details>
             <details class="card">
               <summary>Ограничения и замечания</summary>
               <ul id="warnings"></ul>

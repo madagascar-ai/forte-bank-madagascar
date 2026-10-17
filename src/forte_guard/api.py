@@ -44,6 +44,7 @@ ARTIFACTS = {
     "candidates.llm",
     "catalog_snapshot",
     "run_config",
+    "summary",
 }
 
 

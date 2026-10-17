@@ -250,6 +250,42 @@ function table(headers, rows) {
   t.append(body);
   return t;
 }
+async function renderSummary(result, id) {
+  show("summary-intro", false);
+  show("summary-observed-card", false);
+  show("summary-checks", false);
+  let summary;
+  try {
+    summary = await json(`/api/v1/jobs/${id}/artifacts/summary`);
+  } catch {
+    return; // Interface-only artifact; a missing/failed fetch shows no error, just no extra block.
+  }
+  const noViolation = result.verdict !== "violation";
+  const observed = summary.observed || [];
+  if (noViolation) {
+    show("summary-intro", true);
+    if (observed.length) {
+      show("summary-observed-card", true);
+      $("summary-observed").replaceChildren(...observed.map((text) => el("li", text)));
+    }
+  }
+  const performed = summary.checks_performed || [];
+  const notPerformed = summary.checks_not_performed || [];
+  if (performed.length || notPerformed.length) {
+    show("summary-checks", true);
+    $("summary-performed").replaceChildren(
+      ...performed.map((check) => {
+        const item = el("li", check.title);
+        if (check.clauses?.length)
+          item.append(el("small", " — " + check.clauses.join("; ")));
+        return item;
+      }),
+    );
+    $("summary-not-performed").replaceChildren(
+      ...notPerformed.map((text) => el("li", text)),
+    );
+  }
+}
 async function renderResult(result, generation, id) {
   const positive = result.verdict === "violation";
   $("verdict").className = "verdict" + (positive ? "" : " clear");
@@ -335,6 +371,7 @@ async function renderResult(result, generation, id) {
     $("findings").append(card);
   }
   $("warnings").replaceChildren(...result.warnings.map((w) => el("li", w)));
+  await renderSummary(result, id);
   const [actions, objects, candidates] = await Promise.all(
     ["action_journal", "object_journal", "candidates"].map((name) =>
       json(`/api/v1/jobs/${id}/artifacts/${name}`),

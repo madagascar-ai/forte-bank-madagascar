@@ -7,10 +7,19 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .contracts import AnalysisResult, Evidence, Frame, ObjectJournal, Violation, ZoneProfile
+from .contracts import (
+    ActionJournal,
+    AnalysisResult,
+    Evidence,
+    Frame,
+    ObjectJournal,
+    Rule,
+    Violation,
+    ZoneProfile,
+)
 from .journal.builder import build_journal
 from .journal.zones import CORE_ZONES, estimate_zones
-from .reasoning.catalog import load_catalog
+from .reasoning.catalog import eligible, load_catalog
 from .reasoning.llm import auto_zones, llm_candidates
 from .reasoning.rules import rule_candidates
 from .reasoning.validation import merge_candidates, validate_candidates
@@ -18,6 +27,67 @@ from .settings import Settings
 from .storage import write_json
 from .video import Deadline, sample_video
 from .vision.detector import ReplayDetector, YoloTracker
+
+# Interface-only artifact (summary.json): never part of the jury contract (AnalysisResult/result.json).
+# Russian names for journal.unsupported_actions, which stay as internal English identifiers.
+UNSUPPORTED_ACTION_LABELS = {
+    "authenticity_verified": "проверка подлинности купюр",
+    "identity_verified": "идентификация клиента по документу",
+    "safe_locked": "запирание сейфа на замок",
+    "seal_integrity_verified": "целостность пломбы",
+    "cash_batches_merged": "объединение пачек наличных",
+    "cash_batch_split": "разделение пачки наличных",
+    "cash_batches_mixed_across_sessions": "смешивание пачек наличных разных клиентов",
+}
+_OPENABLE_LABELS = {"door": "Дверь открывалась в кадре.", "safe": "Сейф открывался в кадре."}
+
+
+def _observed_facts(journal: ActionJournal) -> list[str]:
+    facts = [f"Длительность видео: {journal.duration_sec:.1f} с."]
+    clients = sum(1 for a in journal.actions if a.type == "client_observed")
+    if clients:
+        facts.append(f"Клиентов в кадре: {clients}.")
+    transfers = sum(1 for a in journal.actions if a.type == "cash_transferred")
+    if transfers:
+        facts.append(f"Передач наличных зафиксировано: {transfers}.")
+    counted = sum(1 for a in journal.actions if a.type == "cash_counted")
+    if counted:
+        facts.append(f"Пересчётов на счётной машинке: {counted}.")
+    for label, message in _OPENABLE_LABELS.items():
+        opened = any(
+            a.type in {f"{label}_opened", f"{label}_state_observed"} and a.attributes.get("state") == "open"
+            for a in journal.actions
+        )
+        if opened:
+            facts.append(message)
+    departures = sum(1 for a in journal.actions if a.type == "cashier_left_workstation")
+    if departures:
+        facts.append(f"Кассир отходил(а) от рабочего места: {departures} раз(а).")
+    return facts
+
+
+def _build_summary(rules: list[Rule], journal: ActionJournal) -> dict:
+    # checks_performed/not_performed mirror eligible() exactly, so the summary never claims a check
+    # ran when the rule engine itself would have skipped it (disabled, or missing a capability).
+    performed: dict[str, set[str]] = {}
+    not_performed: list[str] = []
+    for rule in rules:
+        if not rule.enabled:
+            continue
+        if eligible(rule, journal):
+            performed.setdefault(rule.title, set()).add(rule.document.get("clause", ""))
+        else:
+            not_performed.append(rule.title)
+    not_performed.extend(UNSUPPORTED_ACTION_LABELS.get(action, action) for action in journal.unsupported_actions)
+    return {
+        "checks_performed": [
+            {"title": title, "clauses": sorted(clause for clause in clauses if clause)}
+            for title, clauses in performed.items()
+        ],
+        "checks_not_performed": list(dict.fromkeys(not_performed)),
+        "observed": _observed_facts(journal),
+        "notes": list(dict.fromkeys(journal.warnings)),
+    }
 
 
 def _evidence(candidate, frame_map: dict[str, Frame]) -> list[Evidence]:
@@ -196,5 +266,6 @@ def run_pipeline(
     )
     deadline.remaining()
     write_json(output / "result.json", result)
+    write_json(output / "summary.json", _build_summary(rules, journal))
     progress("done", 1.0)
     return result
