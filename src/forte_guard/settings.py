@@ -46,7 +46,7 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("FORTE_DATA_DIR", "data")))
     config_dir: Path = field(default_factory=lambda: Path(os.getenv("FORTE_CONFIG_DIR", "config")))
     model_path: Path = field(
-        default_factory=lambda: Path(os.getenv("FORTE_MODEL_PATH", "models/detector-v1.pt"))
+        default_factory=lambda: Path(os.getenv("FORTE_MODEL_PATH", "models/detector-v2.pt"))
     )
     detector: str = field(default_factory=lambda: os.getenv("FORTE_DETECTOR", "yolo"))
     device: str = field(default_factory=lambda: os.getenv("FORTE_DEVICE", "auto"))

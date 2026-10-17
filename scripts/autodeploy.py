@@ -70,7 +70,7 @@ def environment(root, release=None):
             values[key] = value.strip().strip("\"'")
     # All persistent state belongs to this runtime, never a developer's checkout.
     values["FORTE_DATA_DIR"] = str(root / "data")
-    model = Path(values.get("FORTE_MODEL_PATH", "models/detector-v1.pt"))
+    model = Path(values.get("FORTE_MODEL_PATH", "models/detector-v2.pt"))
     values["FORTE_MODEL_PATH"] = str(model if model.is_absolute() else root / model)
     values["FORTE_DEPLOY_STATE"] = str(root / "status.json")
     values["PYTHONUNBUFFERED"] = "1"
