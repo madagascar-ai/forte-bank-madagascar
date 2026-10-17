@@ -658,3 +658,42 @@ footer {
   background: #12151c;
   border-radius: 8px;
 }
+
+.nav + .nav {
+  margin-top: 6px;
+}
+.nav:not(.active) {
+  background: none;
+  color: #525a69;
+}
+.benchmark-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.benchmark-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+#benchmark-view .card {
+  margin-bottom: 20px;
+}
+.outcome {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  white-space: nowrap;
+  background: #f1f2f5;
+}
+.outcome-TP,
+.outcome-TN {
+  background: #e7f4ea;
+  color: #2f6b3d;
+}
+.outcome-FN,
+.outcome-FP,
+.outcome-failed {
+  background: #f9edf2;
+  color: var(--accent);
+}

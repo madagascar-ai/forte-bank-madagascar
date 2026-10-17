@@ -13,6 +13,7 @@
       >
       <div class="sidebar-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
       <button class="nav active" id="new-job">＋ Новая проверка</button>
+      <button class="nav hidden" id="benchmark-nav">Бенчмарк</button>
       <div class="sidebar-label">ПОСЛЕДНИЕ ПРОВЕРКИ</div>
       <div id="history" class="history"></div>
       <div class="local-status">
@@ -164,6 +165,42 @@
               <pre id="candidates-json"></pre>
             </div>
           </section>
+        </div>
+      </section>
+      <section id="benchmark-view" class="hidden">
+        <div class="job-heading">
+          <div>
+            <h2>Бенчмарк на размеченных видео</h2>
+            <p>
+              Сервис прогоняет каждое видео как обычную проверку и сравнивает
+              ответ с разметкой команды. Тип нарушения оценивает локальная LLM.
+            </p>
+          </div>
+          <div class="benchmark-actions">
+            <button id="benchmark-cancel" class="secondary hidden">
+              Остановить
+            </button>
+            <button id="benchmark-run" class="primary">
+              Run benchmark <span>→</span>
+            </button>
+          </div>
+        </div>
+        <p id="benchmark-status" class="benchmark-status"></p>
+        <div class="metrics" id="benchmark-metrics"></div>
+        <div class="card">
+          <div class="section-heading">
+            <h3>Прогоны</h3>
+            <span>Нажмите на прогон, чтобы открыть результаты по видео</span>
+          </div>
+          <div id="benchmark-runs" class="table-scroll"></div>
+        </div>
+        <div class="card hidden" id="benchmark-detail">
+          <div class="section-heading">
+            <h3 id="benchmark-detail-title"></h3>
+            <span id="benchmark-detail-config"></span>
+          </div>
+          <ul id="benchmark-warnings"></ul>
+          <div id="benchmark-items" class="table-scroll"></div>
         </div>
       </section>
       <footer>

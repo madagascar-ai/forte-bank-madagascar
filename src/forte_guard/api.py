@@ -15,11 +15,13 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
+from .benchmark import BenchmarkRunner
 from .contracts import ZoneProfile
 from .pipeline import run_pipeline
 from .readiness import inspect_readiness
@@ -49,6 +51,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.validate()
     store = JobStore(settings.data_dir, recover=True)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="forte-job")
+    # Shares the single worker: benchmark videos never compete with uploads for GPU/RAM.
+    benchmarks = BenchmarkRunner(settings, executor) if settings.benchmark_enabled else None
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -223,6 +227,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await file.close()
         return {"job_id": job_id, "status": "processing"}
 
+    def runner() -> BenchmarkRunner:
+        if benchmarks is None:
+            raise HTTPException(404, "Бенчмарк отключён (FORTE_BENCHMARK_ENABLED)")
+        return benchmarks
+
+    @app.get("/api/v1/benchmarks", dependencies=[Depends(require_key)])
+    def list_benchmarks():
+        if benchmarks is None:
+            return {"enabled": False, "running": None, "runs": []}
+        return {"enabled": True, "running": benchmarks.running(), "runs": benchmarks.list()}
+
+    @app.post("/api/v1/benchmarks", dependencies=[Depends(require_key)], status_code=202)
+    def start_benchmark():
+        if store.maintenance():
+            raise HTTPException(503, "Сервис обновляется", headers={"Retry-After": "10"})
+        try:
+            run = runner().start()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from None
+        except (ValueError, OSError, httpx.HTTPError) as exc:
+            logger.error("Benchmark start failed: %s", type(exc).__name__)
+            message = str(exc) if isinstance(exc, ValueError) else f"Разметка недоступна ({type(exc).__name__})"
+            raise HTTPException(422, message) from None
+        return {"run_id": run["run_id"], "status": run["status"], "videos": len(run["items"])}
+
+    @app.get("/api/v1/benchmarks/{run_id}", dependencies=[Depends(require_key)])
+    def get_benchmark(run_id: str):
+        try:
+            return runner().get(run_id)
+        except KeyError:
+            raise HTTPException(404, "Прогон не найден") from None
+
+    @app.post("/api/v1/benchmarks/{run_id}/cancel", dependencies=[Depends(require_key)])
+    def cancel_benchmark(run_id: str):
+        try:
+            run = runner().cancel(run_id)
+        except KeyError:
+            raise HTTPException(404, "Прогон не найден") from None
+        return {"run_id": run_id, "status": run["status"]}
+
     @app.get("/api/v1/readiness", dependencies=[Depends(require_key)])
     def readiness():
         report = inspect_readiness(settings)
@@ -308,6 +352,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "zone_model": settings.zone_model,
             "llm_enabled": settings.llm_enabled,
             "auto_zones": settings.auto_zones,
+            "benchmark_enabled": settings.benchmark_enabled,
             "client_access_restricted": bool(settings.allowed_clients),
             "verification_mode": "structural_only",
             "max_upload_mb": settings.max_upload_mb,

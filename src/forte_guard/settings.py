@@ -56,6 +56,16 @@ class Settings:
     zone_model: str = field(
         default_factory=lambda: os.getenv("FORTE_ZONE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma3:4b")
     )
+    # Offline benchmark against team labels; off by default so the jury cannot start it.
+    benchmark_enabled: bool = field(default_factory=lambda: _bool("FORTE_BENCHMARK_ENABLED", False))
+    benchmark_labels: str = field(default_factory=lambda: os.getenv("FORTE_BENCHMARK_LABELS", ""))
+    benchmark_videos: Path = field(
+        default_factory=lambda: Path(os.getenv("FORTE_BENCHMARK_VIDEOS", "videos"))
+    )
+    benchmark_tolerance_sec: float = 3.0
+    judge_model: str = field(
+        default_factory=lambda: os.getenv("FORTE_JUDGE_MODEL") or os.getenv("FORTE_LLM_MODEL", "gemma3:4b")
+    )
     job_timeout_sec: float = field(default_factory=lambda: float(os.getenv("FORTE_JOB_TIMEOUT_SEC", "285")))
     max_upload_mb: int = 256
     max_video_sec: float = 180

@@ -100,6 +100,7 @@ $("connect").onclick = async () => {
     S.connected = true;
     $("connection-status").textContent = "Подключено";
     await history();
+    await benchmarkAvailable();
   } catch (e) {
     $("connection-status").textContent = e.message;
   }
@@ -107,12 +108,17 @@ $("connect").onclick = async () => {
 $("api-key").onkeydown = (e) => {
   if (e.key === "Enter") $("connect").click();
 };
+function navigate(view) {
+  for (const id of ["upload-view", "job-view", "benchmark-view"])
+    show(id, id === view);
+  $("new-job").classList.toggle("active", view !== "benchmark-view");
+  $("benchmark-nav").classList.toggle("active", view === "benchmark-view");
+}
 $("new-job").onclick = () => {
   S.generation++;
   S.job = null;
   S.result = null;
-  show("upload-view");
-  show("job-view", false);
+  navigate("upload-view");
   if (S.videoURL) {
     URL.revokeObjectURL(S.videoURL);
     S.videoURL = null;
@@ -277,8 +283,7 @@ async function selectJob(id, name) {
     URL.revokeObjectURL(S.videoURL);
     S.videoURL = null;
   }
-  show("upload-view", false);
-  show("job-view");
+  navigate("job-view");
   show("processing");
   show("result-panel", false);
   show("error-box", false);
@@ -590,6 +595,7 @@ json("/api/v1/access")
     if (access.authorized) {
       S.connected = true;
       await history();
+      await benchmarkAvailable();
     } else {
       show("connection-panel");
     }
@@ -598,3 +604,222 @@ json("/api/v1/access")
     show("connection-panel");
     $("connection-status").textContent = error.message;
   });
+
+// Benchmark: labels and comments are rendered only here, never sent anywhere else.
+const outcomeNames = {
+  TP: "Нашли",
+  FN: "Пропуск",
+  FP: "Ложное",
+  TN: "Верно: нет",
+  failed: "Ошибка",
+};
+const runStatusNames = {
+  running: "Выполняется",
+  cancelling: "Останавливается",
+  done: "Завершён",
+  cancelled: "Остановлен",
+  interrupted: "Прерван перезапуском",
+};
+function percent(value) {
+  return value === null || value === undefined
+    ? "—"
+    : Math.round(value * 100) + "%";
+}
+async function benchmarkAvailable() {
+  try {
+    const d = await json("/api/v1/benchmarks");
+    show("benchmark-nav", d.enabled);
+  } catch {
+    show("benchmark-nav", false);
+  }
+}
+async function loadBenchmarks() {
+  clearTimeout(S.benchmarkTimer);
+  const d = await json("/api/v1/benchmarks");
+  const running = d.runs.find((r) => r.run_id === d.running);
+  $("benchmark-run").disabled = Boolean(d.running);
+  show("benchmark-cancel", Boolean(running && running.status === "running"));
+  S.benchmarkRunning = d.running;
+  const latest = running || d.runs[0];
+  if (latest) {
+    const s = latest.summary;
+    $("benchmark-status").textContent =
+      (runStatusNames[latest.status] || latest.status) +
+      " · обработано " +
+      s.processed +
+      " из " +
+      s.videos +
+      (latest.status === "running"
+        ? " · загрузки пользователей обрабатываются между видео"
+        : "");
+    $("benchmark-metrics").replaceChildren(
+      ...[
+        [percent(s.accuracy), "Верный вердикт"],
+        [percent(s.recall), `Найдено нарушений (${s.TP} из ${s.TP + s.FN})`],
+        [s.FP, "Ложных срабатываний"],
+        [
+          s.located_of ? `${s.located}/${s.located_of}` : "—",
+          `Таймкод ±${latest.config.tolerance_sec} с`,
+        ],
+        [
+          s.judged ? `${s.judge_yes}/${s.judged}` : "—",
+          "Судья: то же нарушение",
+        ],
+        [s.judged ? `${s.judge_type_match}/${s.judged}` : "—", "Судья: верный тип"],
+        [
+          s.max_processing_sec === null ? "—" : s.max_processing_sec + " с",
+          "Макс. время на видео",
+        ],
+        [s.failed + s.over_time_limit, "Сбоев и превышений лимита"],
+      ].map(([value, title]) => {
+        const n = el("div", null, "metric");
+        n.append(el("strong", value), el("span", title));
+        return n;
+      }),
+    );
+  } else {
+    $("benchmark-status").textContent =
+      "Прогонов ещё не было. Нажмите Run benchmark.";
+    $("benchmark-metrics").replaceChildren();
+  }
+  $("benchmark-runs").replaceChildren(
+    table(
+      [
+        "Запуск",
+        "Статус",
+        "Версия",
+        "Модели",
+        "Вердикт",
+        "Recall",
+        "Ложные",
+        "Таймкод",
+        "Судья",
+      ],
+      d.runs.map((r) => {
+        const s = r.summary,
+          open = el("button", new Date(r.started_at * 1000).toLocaleString());
+        open.onclick = () => showBenchmark(r.run_id);
+        return [
+          open,
+          (runStatusNames[r.status] || r.status) + ` (${s.processed}/${s.videos})`,
+          (r.config.release || "").slice(0, 7),
+          [r.config.model, r.config.llm_model || "без LLM"].join(" · "),
+          percent(s.accuracy),
+          percent(s.recall),
+          s.FP,
+          s.located_of ? `${s.located}/${s.located_of}` : "—",
+          s.judged ? `${s.judge_yes}/${s.judged}` : "—",
+        ];
+      }),
+    ),
+  );
+  const selected = S.benchmarkSelected || latest?.run_id;
+  if (selected) await showBenchmark(selected);
+  if (d.running && !$("benchmark-view").classList.contains("hidden"))
+    S.benchmarkTimer = setTimeout(() => loadBenchmarks().catch(() => {}), 5000);
+}
+async function showBenchmark(runId) {
+  S.benchmarkSelected = runId;
+  const run = await json("/api/v1/benchmarks/" + runId);
+  show("benchmark-detail");
+  $("benchmark-detail-title").textContent =
+    "Прогон " + new Date(run.started_at * 1000).toLocaleString();
+  const c = run.config;
+  $("benchmark-detail-config").textContent = [
+    "версия " + (c.release || "").slice(0, 7),
+    c.detector + " · " + c.model,
+    c.sample_fps + " fps",
+    "LLM " + (c.llm_model || "выкл."),
+    "судья " + c.judge_model,
+    "разметка " + c.labels_sha,
+  ].join(" · ");
+  $("benchmark-warnings").replaceChildren(
+    ...run.warnings.map((w) => el("li", w)),
+  );
+  $("benchmark-items").replaceChildren(
+    table(
+      [
+        "Видео",
+        "Разметка",
+        "Ответ сервиса",
+        "Итог",
+        "Ошибка таймкода",
+        "Судья",
+        "Комментарий разметки",
+      ],
+      run.items.map((item) => {
+        const label = item.label,
+          s = item.score || {},
+          expected = label.violation
+            ? "Нарушение" +
+              (label.times.length
+                ? " · " + label.times.map((t) => clock(t)).join(", ")
+                : "")
+            : "Без нарушения";
+        let answer = "—";
+        if (item.status === "running") answer = "Обрабатывается…";
+        else if (item.status === "pending") answer = "В очереди";
+        else if (item.status === "skipped") answer = "Пропущено";
+        else if (item.error) answer = "Ошибка: " + item.error;
+        else if (item.violations)
+          answer = item.violations.length
+            ? item.violations
+                .map((v) => clock(v.timecode_sec) + " " + v.type)
+                .join("; ")
+            : "Без нарушения";
+        const outcome = el(
+          "span",
+          outcomeNames[s.outcome] || "—",
+          "outcome outcome-" + (s.outcome || "none"),
+        );
+        let judge = "—";
+        if (typeof item.judge === "string") judge = item.judge;
+        else if (item.judge)
+          judge =
+            { yes: "Да", partial: "Частично", no: "Нет" }[item.judge.same_event] +
+            (item.judge.type_match ? ", тип верный" : ", тип неверный") +
+            " — " +
+            item.judge.explanation;
+        return [
+          item.video,
+          expected,
+          answer,
+          outcome,
+          s.time_error_sec === null || s.time_error_sec === undefined
+            ? "—"
+            : s.time_error_sec + " с",
+          judge,
+          label.comment || "—",
+        ];
+      }),
+    ),
+  );
+}
+$("benchmark-nav").onclick = () => {
+  navigate("benchmark-view");
+  loadBenchmarks().catch((e) => {
+    $("benchmark-status").textContent = e.message;
+  });
+};
+$("benchmark-run").onclick = async () => {
+  if (
+    !confirm(
+      "Прогнать все размеченные видео? Это займёт десятки минут. Не запускайте во время проверки жюри.",
+    )
+  )
+    return;
+  try {
+    const r = await json("/api/v1/benchmarks", { method: "POST" });
+    S.benchmarkSelected = r.run_id;
+    await loadBenchmarks();
+  } catch (e) {
+    $("benchmark-status").textContent = e.message;
+  }
+};
+$("benchmark-cancel").onclick = async () => {
+  if (!S.benchmarkRunning) return;
+  await json(`/api/v1/benchmarks/${S.benchmarkRunning}/cancel`, {
+    method: "POST",
+  });
+  await loadBenchmarks();
+};
