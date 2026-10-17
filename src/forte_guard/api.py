@@ -8,6 +8,7 @@ import re
 import shutil
 import time
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
@@ -105,11 +106,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 parsed = urlparse(origin)
                 if parsed.scheme not in {"http", "https"} or parsed.netloc != request.headers.get("host"):
                     raise HTTPException(403, "Запрос должен исходить из интерфейса сервиса")
-            return
+            return "ui"
         if x_api_key is None and settings.web_access == "trusted_clients" and not ui_allowed(request):
             raise HTTPException(403, "Доступ с этого устройства не разрешён")
         if x_api_key is None or not hmac.compare_digest(x_api_key.encode(), settings.api_key.encode()):
             raise HTTPException(401, "Неверный или отсутствующий X-API-Key")
+        return "key"
+
+    # Generous safety limits for keyless browser uploads only; X-API-Key (jury) uploads bypass them.
+    ui_jobs: set[str] = set()
+    ui_uploads: deque[float] = deque()
+
+    def check_ui_limits():
+        now = time.time()
+        while ui_uploads and now - ui_uploads[0] > 3600:
+            ui_uploads.popleft()
+        if settings.ui_max_uploads_per_hour and len(ui_uploads) >= settings.ui_max_uploads_per_hour:
+            raise HTTPException(
+                429, "Слишком много загрузок за час. Повторите позже.", headers={"Retry-After": "300"}
+            )
+        ui_jobs.intersection_update(
+            job_id for job_id in ui_jobs if (store.get(job_id) or {}).get("status") == "processing"
+        )
+        if settings.ui_max_queued and len(ui_jobs) >= settings.ui_max_queued:
+            raise HTTPException(
+                429, "Сервис занят: в очереди много видео. Повторите позже.", headers={"Retry-After": "60"}
+            )
 
     @app.get("/api/v1/access")
     def access(request: Request):
@@ -175,14 +197,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "release": os.getenv("FORTE_RELEASE_SHA", "workspace"),
         }
 
-    @app.post("/api/v1/analyze", dependencies=[Depends(require_key)], status_code=202)
-    async def analyze(file: Annotated[UploadFile, File()], zones: Annotated[str | None, Form()] = None):
+    @app.post("/api/v1/analyze", status_code=202)
+    async def analyze(
+        file: Annotated[UploadFile, File()],
+        zones: Annotated[str | None, Form()] = None,
+        auth: str = Depends(require_key),
+    ):
         if store.maintenance():
             raise HTTPException(
                 503,
                 "Сервис обновляется. Повторите загрузку через несколько секунд.",
                 headers={"Retry-After": "10"},
             )
+        if auth == "ui":
+            check_ui_limits()
         filename = Path((file.filename or "video.mov").replace("\\", "/")).name
         if Path(filename).suffix.lower() not in {".mov", ".mp4"}:
             raise HTTPException(415, "Поддерживаются MOV и MP4")
@@ -218,6 +246,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "Сервис обновляется. Повторите загрузку через несколько секунд.",
                     headers={"Retry-After": "10"},
                 ) from None
+            if auth == "ui":
+                ui_jobs.add(job_id)
+                ui_uploads.append(time.time())
             executor.submit(worker, job_id)
         except Exception:
             if store.get(job_id) is None:

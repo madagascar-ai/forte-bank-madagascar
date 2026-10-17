@@ -71,7 +71,7 @@ forte-guard analyze /path/to/video.mov --zones /path/to/zones.json --output data
 
 Все маршруты `/api/v1/*` требуют `X-API-Key`. Секрет не передаётся в URL.
 
-Чтобы интерфейс не спрашивал ключ, задайте на сервере `FORTE_WEB_ACCESS=open`. При открытии страницы браузер получает HttpOnly-cookie с `SameSite=Strict`, производную от ключа; сам ключ на страницу не попадает, а запросы без ключа и без этой cookie по-прежнему отклоняются. `trusted_clients` выдаёт такую cookie только адресам из `FORTE_ALLOWED_CLIENTS`. По умолчанию (`api_key`) интерфейс просит ключ.
+Чтобы интерфейс не спрашивал ключ, задайте на сервере `FORTE_WEB_ACCESS=open`. При открытии страницы браузер получает HttpOnly-cookie с `SameSite=Strict`, производную от ключа; сам ключ на страницу не попадает, а запросы без ключа и без этой cookie по-прежнему отклоняются. `trusted_clients` выдаёт такую cookie только адресам из `FORTE_ALLOWED_CLIENTS`. По умолчанию (`api_key`) интерфейс просит ключ. Загрузки из интерфейса без ключа ограничены с запасом: не больше 10 видео в очереди (`FORTE_UI_MAX_QUEUED`) и 60 загрузок в час (`FORTE_UI_MAX_UPLOADS_PER_HOUR`), сверх лимита — HTTP 429. Загрузки с `X-API-Key` (жюри) не ограничиваются.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/analyze \
