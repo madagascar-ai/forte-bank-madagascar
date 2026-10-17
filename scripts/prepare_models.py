@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,9 +17,19 @@ from forte_guard.settings import load_env  # noqa: E402
 load_env(ROOT / ".env")
 # Open-vocabulary detectors whose text classes are baked into local weights.
 BASES = {"yoloe": ("yoloe-26s-seg.pt", "cashier-yoloe26.pt"), "world": ("yolov8s-worldv2.pt", "cashier-world.pt")}
+# Fine-tuned team weights live in a private GitHub release (derived from the dataset: never publish).
+RELEASE = ("detector-v1", "detector-v1.pt")
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--detector", choices=sorted(BASES), default=os.getenv("FORTE_DETECTOR", "world"))
+parser.add_argument("--detector", choices=[*sorted(BASES), "yolo"], default=os.getenv("FORTE_DETECTOR", "yolo"))
 detector = parser.parse_args().detector
+if detector == "yolo":
+    tag, asset = RELEASE
+    target = ROOT / "models" / asset
+    if not target.is_file():
+        target.parent.mkdir(exist_ok=True)
+        subprocess.run(["gh", "release", "download", tag, "-p", asset, "-D", str(target.parent)], check=True)
+    print(f"Detector weights ready: {target.relative_to(ROOT)}. Use FORTE_DETECTOR=yolo and FORTE_MODEL_PATH=models/{asset}.")
+    raise SystemExit
 if detector not in BASES:
     parser.error(f"FORTE_DETECTOR={detector} has no prepared open-vocabulary weights; use --detector")
 

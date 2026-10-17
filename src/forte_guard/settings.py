@@ -46,15 +46,15 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: Path(os.getenv("FORTE_DATA_DIR", "data")))
     config_dir: Path = field(default_factory=lambda: Path(os.getenv("FORTE_CONFIG_DIR", "config")))
     model_path: Path = field(
-        default_factory=lambda: Path(os.getenv("FORTE_MODEL_PATH", "models/cashier-world.pt"))
+        default_factory=lambda: Path(os.getenv("FORTE_MODEL_PATH", "models/detector-v1.pt"))
     )
-    detector: str = field(default_factory=lambda: os.getenv("FORTE_DETECTOR", "world"))
+    detector: str = field(default_factory=lambda: os.getenv("FORTE_DETECTOR", "yolo"))
     device: str = field(default_factory=lambda: os.getenv("FORTE_DEVICE", "auto"))
     sample_fps: float = field(default_factory=lambda: float(os.getenv("FORTE_SAMPLE_FPS", "5")))
     llm_enabled: bool = field(default_factory=lambda: _bool("FORTE_LLM_ENABLED", True))
     auto_zones: bool = field(default_factory=lambda: _bool("FORTE_AUTO_ZONES", True))
     # "track": absence only when a cashier track is seen away; "zone": also when the workstation stays empty.
-    cashier_presence: str = field(default_factory=lambda: os.getenv("FORTE_CASHIER_PRESENCE", "track"))
+    cashier_presence: str = field(default_factory=lambda: os.getenv("FORTE_CASHIER_PRESENCE", "zone"))
     ollama_url: str = field(default_factory=lambda: os.getenv("FORTE_OLLAMA_URL", "http://127.0.0.1:11434"))
     llm_model: str = field(default_factory=lambda: os.getenv("FORTE_LLM_MODEL", "gemma3:4b"))
     # The zone fallback sends a frame, so it needs a vision-capable model; text-only LLMs cannot do it.
