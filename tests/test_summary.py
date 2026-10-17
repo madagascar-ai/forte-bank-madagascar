@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 from forte_guard.api import create_app
 from forte_guard.contracts import ActionJournal, Rule
-from forte_guard.pipeline import _build_summary, run_pipeline
+from forte_guard.pipeline import _build_summary, _describe_video, run_pipeline
+from forte_guard.video import Deadline
 
 
 def _rule(id, title, **overrides):
@@ -97,5 +98,43 @@ def test_no_violation_job_exposes_summary_but_jury_api_is_unchanged(monkeypatch,
 
         assert client.get(f"/api/v1/jobs/{job}/artifacts/summary").status_code == 401
         summary = client.get(f"/api/v1/jobs/{job}/artifacts/summary", headers=headers).json()
-        assert set(summary) == {"checks_performed", "checks_not_performed", "observed", "notes"}
+        assert set(summary) == {
+            "checks_performed",
+            "checks_not_performed",
+            "observed",
+            "notes",
+            "description",
+        }
         assert summary["checks_performed"]
+        assert summary["description"] is None  # settings fixture disables the LLM branch
+
+
+def test_description_is_skipped_without_llm_or_facts(settings):
+    assert _describe_video(settings, ["Длительность видео: 5.0 с."], Deadline(5)) is None  # llm disabled
+    settings.llm_enabled = True
+    assert _describe_video(settings, [], Deadline(5)) is None  # nothing to describe
+
+
+def test_description_uses_only_the_given_facts(monkeypatch, settings):
+    settings.llm_enabled = True
+    seen = {}
+
+    def fake_chat(settings, prompt, schema, deadline, **kwargs):
+        seen["prompt"] = prompt
+        return {"summary": "Клиент обслужен, деньги пересчитаны на машинке."}
+
+    monkeypatch.setattr("forte_guard.pipeline.local_chat", fake_chat)
+    facts = ["Длительность видео: 8.0 с.", "Клиентов в кадре: 1.", "Пересчётов на счётной машинке: 1."]
+    description = _describe_video(settings, facts, Deadline(5))
+    assert description == "Клиент обслужен, деньги пересчитаны на машинке."
+    assert all(fact in seen["prompt"] for fact in facts)
+
+
+def test_description_failure_is_silent(monkeypatch, settings):
+    settings.llm_enabled = True
+
+    def failing_chat(*args, **kwargs):
+        raise TimeoutError("local LLM unavailable")
+
+    monkeypatch.setattr("forte_guard.pipeline.local_chat", failing_chat)
+    assert _describe_video(settings, ["Длительность видео: 5.0 с."], Deadline(5)) is None

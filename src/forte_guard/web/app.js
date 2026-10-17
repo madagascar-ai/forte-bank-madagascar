@@ -252,8 +252,10 @@ function table(headers, rows) {
 }
 async function renderSummary(result, id) {
   show("summary-intro", false);
+  show("summary-description-card", false);
   show("summary-observed-card", false);
   show("summary-checks", false);
+  show("warnings-details", true);
   let summary;
   try {
     summary = await json(`/api/v1/jobs/${id}/artifacts/summary`);
@@ -264,6 +266,11 @@ async function renderSummary(result, id) {
   const observed = summary.observed || [];
   if (noViolation) {
     show("summary-intro", true);
+    show("warnings-details", false);
+    if (summary.description) {
+      show("summary-description-card", true);
+      $("summary-description").textContent = summary.description;
+    }
     if (observed.length) {
       show("summary-observed-card", true);
       $("summary-observed").replaceChildren(...observed.map((text) => el("li", text)));
@@ -271,7 +278,13 @@ async function renderSummary(result, id) {
   }
   const performed = summary.checks_performed || [];
   const notPerformed = summary.checks_not_performed || [];
-  if (performed.length || notPerformed.length) {
+  // Not shown when there's nothing to check against: "checked" alone already implies "not checked"
+  // is everything else, and listing it again just adds noise to a clean result.
+  show("summary-not-performed-block", !noViolation);
+  $("summary-checks-label").textContent = noViolation
+    ? "Проверено"
+    : "Проверено / не проверялось";
+  if (performed.length || (!noViolation && notPerformed.length)) {
     show("summary-checks", true);
     $("summary-performed").replaceChildren(
       ...performed.map((check) => {

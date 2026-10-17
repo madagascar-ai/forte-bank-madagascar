@@ -96,18 +96,24 @@
                 Результат — подсказка для проверки человеком.
               </p>
             </div>
+            <div id="summary-description-card" class="card hidden">
+              <h3>Краткое описание видео</h3>
+              <p id="summary-description"></p>
+            </div>
             <div id="summary-observed-card" class="card hidden">
               <h3>Что видно на записи</h3>
               <ul id="summary-observed"></ul>
             </div>
             <details id="summary-checks" class="card hidden">
-              <summary>Проверено / не проверялось</summary>
+              <summary id="summary-checks-label">Проверено / не проверялось</summary>
               <h4>Проверено</h4>
               <ul id="summary-performed"></ul>
-              <h4>Не проверялось</h4>
-              <ul id="summary-not-performed"></ul>
+              <div id="summary-not-performed-block">
+                <h4>Не проверялось</h4>
+                <ul id="summary-not-performed"></ul>
+              </div>
             </details>
-            <details class="card">
+            <details class="card" id="warnings-details">
               <summary>Ограничения и замечания</summary>
               <ul id="warnings"></ul>
             </details>
