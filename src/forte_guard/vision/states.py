@@ -26,7 +26,8 @@ QUESTIONS = {
         ("open", "closed"),
         "This crop from an overhead CCTV camera shows the door of a bank cash room. Is the door open or "
         "closed? open: the door leaf is swung away and the doorway or a gap is visible. closed: the leaf sits "
-        "flush in its frame. Answer unknown if the door is mostly hidden or you cannot tell.",
+        "flush in its frame. A person standing or walking in front of a closed door does not make it open. "
+        "Answer unknown if the door is mostly hidden or you cannot tell.",
     ),
     "safe": (
         ("open", "closed"),
@@ -42,7 +43,10 @@ QUESTIONS = {
         "is not visible.",
     ),
 }
-MARGIN = 0.2  # context around the box: room for a swung door leaf, the frame edge, the screen border
+MARGIN = 0.2  # context around the box on each axis: the frame edge, the screen border
+# Door and safe leaves swing out of the box they had when closed, and a door seen from above is a thin
+# sliver: pad them by a share of the box's longer side so the swung leaf and the doorway stay in the crop.
+SWING = {"door": 0.5, "safe": 0.3}
 CHANGE = 18.0  # mean gray change (0-255) in the most changed 4x4 cell that counts as a new look
 STALE_SEC = 10.0  # re-check a steady object at least this often
 COOLDOWN_SEC = 1.0  # never re-read one object more often: a person moving in front must not eat the budget
@@ -52,9 +56,13 @@ BUDGET_SEC = 30.0  # hard cap on the whole stage, on top of FORTE_STATES_MAX_CAL
 CONTEXT = 16384
 
 
-def _crop(image: np.ndarray, box) -> np.ndarray | None:
+def _crop(image: np.ndarray, box, label: str) -> np.ndarray | None:
     height, width = image.shape[:2]
-    pad_x, pad_y = (box.x2 - box.x1) * MARGIN, (box.y2 - box.y1) * MARGIN
+    if label in SWING:
+        pad = max((box.x2 - box.x1) * width, (box.y2 - box.y1) * height) * SWING[label]
+        pad_x, pad_y = pad / width, pad / height
+    else:
+        pad_x, pad_y = (box.x2 - box.x1) * MARGIN, (box.y2 - box.y1) * MARGIN
     x1, y1 = int(max(0.0, box.x1 - pad_x) * width), int(max(0.0, box.y1 - pad_y) * height)
     x2, y2 = int(min(1.0, box.x2 + pad_x) * width), int(min(1.0, box.y2 + pad_y) * height)
     if x2 - x1 < MIN_SIDE or y2 - y1 < MIN_SIDE:
@@ -92,6 +100,9 @@ def read_states(
     anchors: dict[str, object] = {}
     share = max(1, settings.states_max_calls // len(QUESTIONS))  # door, safe and laptop split the budget
     label_calls: dict[str, int] = {}
+    # The first crop read for a door or safe: later reads compare against it, because from above a swung
+    # leaf is far easier to see as a difference than in a single crop.
+    references: dict[str, str] = {}
     calls = reused = known = 0
     failures: set[str] = set()
     trace: list[dict] = []
@@ -113,7 +124,7 @@ def read_states(
         if image is None:
             continue
         for detection in targets:
-            crop = _crop(image, anchors.setdefault(detection.track_id, detection.box))
+            crop = _crop(image, anchors.setdefault(detection.track_id, detection.box), detection.label)
             if crop is None:
                 record(frame, detection, "too_small")
                 continue
@@ -149,19 +160,29 @@ def read_states(
                     "required": ["state", "reason"],
                 }
                 prompt = question + " Also give a short reason, at most 12 words, naming what you see."
+                reference = references.get(detection.track_id)
+                images = [workdir / name]
+                if reference:
+                    images.insert(0, workdir / reference)
+                    prompt = (
+                        "Image 1 shows the same object earlier in this video, only as a reference for how it "
+                        "looks; it may itself be open or closed. Judge image 2: compare the leaf with image 1, "
+                        "a leaf that has moved or a newly visible gap or interior means open. " + prompt
+                    )
                 calls += 1
                 why = "first look" if cached is None else ("changed" if not unchanged else "stale")
                 try:
-                    answer = ask(settings, prompt, schema, deadline, [workdir / name], 30, CONTEXT,
-                                 settings.states_model)
+                    answer = ask(settings, prompt, schema, deadline, images, 30, CONTEXT, settings.states_model)
                     raw = answer.get("state")
                     state = raw if raw in allowed else None
                     record(frame, detection, "asked", state, change, why=why, answer=raw,
-                           reason=str(answer.get("reason", ""))[:200], crop=name)
+                           reason=str(answer.get("reason", ""))[:200], crop=name, reference=reference)
                 except Exception as exc:  # a failed read leaves the state unknown, never invented
                     failures.add(type(exc).__name__)
                     state = None
                     record(frame, detection, "failed", None, change, why=why, error=type(exc).__name__, crop=name)
+                if detection.label in SWING:
+                    references.setdefault(detection.track_id, name)
                 cache[detection.track_id] = (signature, frame.timestamp_sec, state)
             else:
                 record(frame, detection, "no_budget", None, change)

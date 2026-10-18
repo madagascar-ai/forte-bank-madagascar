@@ -161,6 +161,31 @@ def test_detector_box_jitter_does_not_trigger_new_reads(settings, tmp_path):
     assert model.calls == 1
 
 
+def test_door_reads_compare_with_the_first_crop_and_keep_room_for_the_swung_leaf(settings, tmp_path):
+    settings.object_states = True
+    frames = [frame(tmp_path, 0, 0.0, 200), frame(tmp_path, 1, 2.0, 30)]
+    objects = journal(frames, labels=("door", "laptop"))
+    seen: list[tuple[str, int, tuple]] = []
+
+    def model(settings, prompt, schema, deadline, images, *args):
+        shapes = tuple(cv2.imread(str(path)).shape[:2] for path in images)
+        seen.append((schema["properties"]["state"]["enum"][0], len(images), shapes))
+        return {"state": schema["properties"]["state"]["enum"][0], "reason": ""}
+
+    read_states(frames, objects, settings, Deadline(300), tmp_path / "job" / "crops", ask=model)
+    door = [s for s in seen if s[0] == "open"]
+    laptop = [s for s in seen if s[0] == "on"]
+    assert [count for _, count, _ in door] == [1, 2]  # the second door read sees the first crop too
+    assert door[1][2][0] == door[1][2][1]  # the reference is the same region as the current crop
+    assert door[0][2][0][1] > 80 * 1.4  # padded by half the longer side on each edge, not 20% of the box
+    assert [count for _, count, _ in laptop] == [1, 1]  # a laptop screen is judged on its own
+    import json
+
+    trace = json.loads((tmp_path / "job" / "state_trace.json").read_text())
+    asked = [e for e in trace["entries"] if e["label"] == "door"]
+    assert asked[0]["reference"] is None and asked[1]["reference"] == asked[0]["crop"]
+
+
 def test_an_object_that_keeps_changing_is_read_at_most_once_a_second(settings, tmp_path):
     settings.object_states = True
     frames = [frame(tmp_path, i, i * 0.2, 30 if i % 2 else 220) for i in range(10)]  # flickers every frame

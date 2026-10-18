@@ -546,11 +546,13 @@ async function renderStates(id, generation) {
       const time = el("button", clock(e.t));
       time.onclick = () => seek(e.t);
       const crop = el("span");
-      if (e.crop) {
+      // A door or safe read after the first one is compared with the track's first crop: show both.
+      for (const name of [e.reference, e.crop].filter(Boolean)) {
         const img = el("img", null, "state-crop");
-        img.alt = "вырезка " + e.crop;
+        img.alt = (name === e.reference ? "образец " : "вырезка ") + name;
+        img.title = name === e.reference ? "образец для сравнения" : "что видела модель";
         crop.append(img);
-        api(`/api/v1/jobs/${id}/state-crops/${e.crop}`)
+        api(`/api/v1/jobs/${id}/state-crops/${name}`)
           .then((r) => r.blob())
           .then((b) => (img.src = URL.createObjectURL(b)))
           .catch(() => (img.alt = "нет файла"));
