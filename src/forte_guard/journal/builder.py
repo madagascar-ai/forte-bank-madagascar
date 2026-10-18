@@ -710,11 +710,12 @@ def build_journal(
         others = [p for p in people if roles.get(p.track_id) != "cashier"]
         state("extra_person_present", True if len(others) >= 2 else None, frame)
 
-        unidentified_at_workstation = [
-            p
-            for p in others
-            if roles.get(p.track_id) != "client" and zone_of(p, profile) in WORKSTATION_ZONES
-        ]
+        # A "client"-voted track is not exempt here: the zone vote only says where someone stood
+        # most of the time, not that every entry into the cashier's own restricted area was a
+        # legitimate handover — close_unidentified_episode() still clears them the moment an
+        # actual transaction event overlaps their presence, so a real client reaching across the
+        # counter is unaffected.
+        unidentified_at_workstation = [p for p in others if zone_of(p, profile) in WORKSTATION_ZONES]
         if unidentified_at_workstation:
             if unidentified_episode is None:
                 unidentified_episode = {"start": frame.timestamp_sec, "frame": frame, "actor_ids": set()}
