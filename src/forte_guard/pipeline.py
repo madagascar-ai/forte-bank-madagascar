@@ -27,6 +27,7 @@ from .settings import Settings
 from .storage import write_json
 from .video import Deadline, sample_video
 from .vision.detector import ReplayDetector, YoloTracker
+from .vision.items import relabel_green_bags
 from .vision.states import read_states
 
 # Interface-only artifact (summary.json): never part of the jury contract (AnalysisResult/result.json).
@@ -148,6 +149,7 @@ def run_pipeline(
     detector = ReplayDetector(replay) if replay else YoloTracker(settings)
     objects = detector.run(frames, deadline, lambda value: progress("objects", 0.12 + 0.48 * value))
     timings["objects"] = time.monotonic() - started
+    objects.warnings.extend(relabel_green_bags(frames, objects, settings))
     if settings.object_states:
         started = time.monotonic()
         objects.warnings.extend(read_states(frames, objects, settings, deadline, output / "state_crops"))

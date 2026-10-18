@@ -73,6 +73,8 @@ class Settings:
         or os.getenv("FORTE_LLM_MODEL", "gemma4:26b")
     )
     states_max_calls: int = field(default_factory=lambda: int(os.getenv("FORTE_STATES_MAX_CALLS", "120")))
+    # Mostly-green personal_item tracks become cash_bag (cash-collection bags are green). Off by default.
+    green_bags: bool = field(default_factory=lambda: _bool("FORTE_GREEN_BAGS", False))
     # Limits for keyless browser uploads (0 disables); API-key uploads are never limited.
     ui_max_queued: int = field(default_factory=lambda: int(os.getenv("FORTE_UI_MAX_QUEUED", "10")))
     ui_max_uploads_per_hour: int = field(
