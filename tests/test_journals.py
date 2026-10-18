@@ -23,7 +23,9 @@ def test_tracks_become_transfer_departure_and_state_overlap(demo, settings):
     candidates = rule_candidates(journal, rules, scenarios)
     assert len(candidates) == 1
     assert candidates[0].rule_id == "cashier_left_during_service"
-    assert candidates[0].timecode_sec == departures[0].start_sec
+    # min_duration_sec (1.0 for this rule): the anchor sits where the overlap became a violation,
+    # not where the departure itself started.
+    assert candidates[0].timecode_sec == departures[0].start_sec + 1.0
 
 
 def test_detector_loss_is_unknown_not_observed_departure(tmp_path, settings):
@@ -459,3 +461,42 @@ def test_client_staying_through_the_recount_is_not_flagged(settings):
     rules, scenarios = load_catalog(settings.config_dir)
     candidates = rule_candidates(journal, rules, scenarios)
     assert not any(c.rule_id == "client_left_before_count_complete" for c in candidates)
+
+
+def test_long_open_door_reports_and_validates_near_the_threshold(settings):
+    # min_duration_sec for cash_room_door_open is 4.0: a door seen open for 10s straight should
+    # point at ~4s (when it became a violation), not snap back to 0s (when it merely opened) —
+    # neither in the raw candidate nor after validate_candidates re-picks a witness frame.
+    from forte_guard.contracts import Box, Detection, Frame, ObjectFrame
+    from forte_guard.reasoning.validation import validate_candidates
+
+    fps = 5
+    count = 50  # 10 seconds of a door staying open
+    door = Detection(
+        track_id="door1", label="door", confidence=0.9,
+        box=Box(x1=0.4, y1=0.0, x2=0.6, y2=0.5), attributes={"state": "open"},
+    )
+    object_frames = [
+        ObjectFrame(frame_id=f"f{i:06d}", timestamp_sec=i / fps, detections=[door]) for i in range(count)
+    ]
+    frames = [
+        Frame(
+            frame_id=f"f{i:06d}", timestamp_sec=i / fps, source_frame_index=i,
+            width=640, height=360, image_path=f"/tmp/f{i:06d}.jpg",
+        )
+        for i in range(count)
+    ]
+    objects, profile = _scene([])
+    objects = objects.model_copy(update={"frames": object_frames})
+    journal = build_journal(objects, profile, count / fps, fps)
+
+    rules, scenarios = load_catalog(settings.config_dir)
+    candidates = [c for c in rule_candidates(journal, rules, scenarios) if c.rule_id == "cash_room_door_open"]
+    assert len(candidates) == 1
+    # ~4s in (door opens near 0s, debounce shifts the confirmed start slightly) — not the opening.
+    assert 3.9 <= candidates[0].timecode_sec <= 4.5
+
+    accepted, _ = validate_candidates(candidates, journal, frames, rules)
+    assert len(accepted) == 1
+    # Near the threshold (allow one evidence-sampling interval of slack), nowhere near the opening.
+    assert 3.0 <= accepted[0].timecode_sec <= 5.5

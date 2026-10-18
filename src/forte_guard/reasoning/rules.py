@@ -81,6 +81,10 @@ def rule_candidates(journal: ActionJournal, rules: list[Rule], scenarios: dict) 
                 ]
                 if engine.get("anchor_event") and not anchor_events:
                     continue
+                # Point at the moment the overlap actually became a violation (duration threshold
+                # crossed), not the moment the state first started — "just opened" looks nothing
+                # like "left open" on the evidence frame otherwise.
+                anchor = min(start + engine.get("min_duration_sec", 0), end)
                 found.append(
                     _candidate(
                         rule,
@@ -88,7 +92,7 @@ def rule_candidates(journal: ActionJournal, rules: list[Rule], scenarios: dict) 
                         states,
                         start,
                         end,
-                        start,
+                        anchor,
                         "Наблюдаемые состояния пересекаются в одном интервале обслуживания.",
                     )
                 )

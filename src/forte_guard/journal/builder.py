@@ -63,8 +63,17 @@ MIN_ROLE_SHARE = 0.3
 # middle of the area is more likely bending down or occlusion than leaving, so it waits longer.
 ABSENT_MIN_SEC = 3.0
 ABSENT_MIDZONE_SEC = 6.0
+# A client vanishing mid-area is read a bit more readily than the cashier's own (tuned, verified)
+# threshold above — missing a witnessed recount matters more than a few extra false positives, but
+# this is still a deliberate wait, not instant, to stay clear of a brief occlusion.
+CLIENT_ABSENT_MIDZONE_SEC = 5.0
 ZONE_EDGE_MARGIN = 0.05
 TRANSITIONS = {"open": "opened", "closed": "closed", "on": "turned_on", "off": "turned_off"}
+# A long-running state (e.g. a door staying open) kept only its first and latest frame as evidence,
+# so a rule's min_duration_sec threshold had no real frame to point at near where it was crossed —
+# the witness snapped back to the very first frame, making "left open" look identical to "just
+# opened". Freeze a frame roughly this often so there's always one near any reasonable threshold.
+STATE_EVIDENCE_INTERVAL_SEC = 1.0
 
 
 def _overlaps(inner: Detection, outer: Detection, margin: float = 0.03) -> bool:
@@ -161,10 +170,19 @@ class ZonePresence:
     the frame is still detected; a vanished track alone stays unknown.
     """
 
-    def __init__(self, required: int, area: Box | None, exit_area: Box | None):
+    def __init__(
+        self,
+        required: int,
+        area: Box | None,
+        exit_area: Box | None,
+        min_wait: float = ABSENT_MIN_SEC,
+        midzone_wait: float = ABSENT_MIDZONE_SEC,
+    ):
         self.required = required
         self.area = area
         self.exit_area = exit_area
+        self.min_wait = min_wait
+        self.midzone_wait = midzone_wait
         self.value = None
         self.pending = None
         self.count = 0
@@ -194,7 +212,7 @@ class ZonePresence:
             return None
         if self.empty_since is None:
             self.empty_since = t
-        wait = ABSENT_MIN_SEC if self.edge else ABSENT_MIDZONE_SEC
+        wait = self.min_wait if self.edge else self.midzone_wait
         if walked_away or t - self.last_in >= wait:
             return False
         return None
@@ -297,8 +315,11 @@ def build_journal(
     smoothers = defaultdict(lambda: StableValue(required))
     areas = {zone.name: zone.box for zone in profile.zones}
     workstation = ZonePresence(required, areas.get("cashier_area"), areas.get("exit_area"))
-    client_station = ZonePresence(required, areas.get("client_area"), areas.get("exit_area"))
+    client_station = ZonePresence(
+        required, areas.get("client_area"), areas.get("exit_area"), midzone_wait=CLIENT_ABSENT_MIDZONE_SEC
+    )
     open_states: dict[tuple, State] = {}
+    evidence_marked_at: dict[tuple, float] = {}
     active_session: str | None = None
     sessions: dict[str, str] = {}
     service_sessions: set[str] = set()
@@ -371,9 +392,16 @@ def build_journal(
         previous = open_states.get(key)
         if previous and previous.value == value and previous.session_id == active_session:
             previous.end_sec = frame.timestamp_sec
-            previous.evidence_frame_ids = list(
-                dict.fromkeys([previous.evidence_frame_ids[0], frame.frame_id])
-            )
+            ids = previous.evidence_frame_ids
+            if frame.timestamp_sec - evidence_marked_at[key] >= STATE_EVIDENCE_INTERVAL_SEC:
+                # Freeze the run up to now as a mark, then start a fresh "latest" pointer after it.
+                ids.append(frame.frame_id)
+                evidence_marked_at[key] = frame.timestamp_sec
+            elif len(ids) > 1:
+                ids[-1] = frame.frame_id
+            else:
+                ids.append(frame.frame_id)
+            previous.evidence_frame_ids = list(dict.fromkeys(ids))
             return
         if previous:
             # A state is only extended to the next observed timestamp, not across an unknown gap.
@@ -392,6 +420,7 @@ def build_journal(
         )
         journal.states.append(item)
         open_states[key] = item
+        evidence_marked_at[key] = frame.timestamp_sec
 
     for frame in objects.frames:
         people = [d for d in frame.detections if d.label in {"person", "cashier", "client"}]

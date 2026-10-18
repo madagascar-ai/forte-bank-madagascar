@@ -47,10 +47,12 @@ def test_safe_open_briefly_is_not_a_violation(settings):
     assert not [c for c in run_rules(journal, settings) if c.rule_id == "safe_left_open"]
 
 
-def test_safe_left_open_is_reported_at_opening(settings):
+def test_safe_left_open_is_reported_at_the_threshold_not_the_opening(settings):
+    # safe_left_open's min_duration_sec is 6.0: the violation timecode should land where the
+    # overlap actually crossed that threshold (4 + 6 = 10), not at the moment the safe opened (4).
     journal = journal_with([("safe_door_state", "open", 4, 15)])
     found = [c for c in run_rules(journal, settings) if c.rule_id == "safe_left_open"]
-    assert len(found) == 1 and found[0].timecode_sec == 4
+    assert len(found) == 1 and found[0].timecode_sec == 10
 
 
 def test_unattended_cash_yields_to_departure_during_service(settings):
