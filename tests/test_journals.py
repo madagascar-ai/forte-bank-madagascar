@@ -646,3 +646,14 @@ def test_a_client_who_transacts_during_the_counter_visit_is_not_flagged():
     assert journal.roles["visitor"] == "client"
     assert any(a.type == "document_presented" for a in journal.actions)
     assert not any(a.type == "unidentified_person_no_transaction" for a in journal.actions)
+
+
+def test_a_client_grazing_the_counter_for_one_sample_is_not_flagged():
+    # The box of a client leaning over the counter can dip into it for a single sample.
+    seated = ("visitor", "person", [0.65, 0.1, 0.95, 0.8])
+    frames = [[CASHIER, seated] for _ in range(10)] + [[CASHIER, ("visitor", "person", COUNTER_VISIT)]]
+    frames += [[CASHIER, seated] for _ in range(10)]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    assert journal.roles["visitor"] == "client"
+    assert not any(a.type == "unidentified_person_no_transaction" for a in journal.actions)
