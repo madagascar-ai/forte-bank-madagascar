@@ -14,7 +14,7 @@ import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-from ..contracts import ObjectJournal
+from ..contracts import Box, ObjectJournal
 
 # Classes the detector confuses on the same object; a track takes the label with the highest summed
 # confidence within its group, so a few weak "document" samples don't outvote a confident stack.
@@ -37,6 +37,13 @@ PEOPLE = {"person", "cashier", "client"}
 STATIC_MAX_MOVE = 0.05
 STATIC_MIN_SEC = 2.0
 STATIC_SIZE_RATIO = 0.5
+# A person seated behind a desk and seen from the front gets two boxes from the detector: one down to the
+# desk and one down to the legs under it. When one box lies inside the other in nearly every sample the
+# two tracks share, they are one person, and the track seen less is set aside; otherwise the second box
+# turns into an unknown person at the workstation.
+NESTED_INSIDE = 0.9  # share of the smaller box's area inside the larger one
+NESTED_MIN_SAMPLES = 5  # samples seen together
+NESTED_MIN_SHARE = 0.8  # of those samples
 
 
 @dataclass
@@ -142,9 +149,50 @@ def _set_aside_static_people(objects: ObjectJournal) -> None:
         )
 
 
+def _inside_share(a: Box, b: Box) -> float:
+    """Share of the smaller box's area that lies inside the other box."""
+    width = min(a.x2, b.x2) - max(a.x1, b.x1)
+    height = min(a.y2, b.y2) - max(a.y1, b.y1)
+    if width <= 0 or height <= 0:
+        return 0.0
+    smaller = min((a.x2 - a.x1) * (a.y2 - a.y1), (b.x2 - b.x1) * (b.y2 - b.y1))
+    return width * height / smaller
+
+
+def _set_aside_duplicate_people(objects: ObjectJournal) -> None:
+    samples, together, nested = Counter(), Counter(), Counter()
+    for frame in objects.frames:
+        people = [item for item in frame.detections if item.label in PEOPLE]
+        samples.update(item.track_id for item in people)
+        for index, first in enumerate(people):
+            for second in people[index + 1 :]:
+                if first.track_id == second.track_id:
+                    continue
+                pair = tuple(sorted((first.track_id, second.track_id)))
+                together[pair] += 1
+                nested[pair] += _inside_share(first.box, second.box) >= NESTED_INSIDE
+    duplicates = {
+        min(pair, key=lambda track_id: (samples[track_id], track_id))
+        for pair, count in together.items()
+        if count >= NESTED_MIN_SAMPLES and nested[pair] >= NESTED_MIN_SHARE * count
+    }
+    if not duplicates:
+        return
+    for _, item in _detections(objects):
+        if item.track_id in duplicates and item.label in PEOPLE:
+            item.attributes["raw_label"] = item.label
+            item.label = "duplicate_person"
+    objects.warnings.append(
+        f"Не учитываются вторые боксы на том же человеке ({len(duplicates)}): один бокс почти всё время "
+        "лежит внутри другого."
+    )
+
+
 def repair_tracks(objects: ObjectJournal) -> ObjectJournal:
-    """One label per track among confusable classes, broken tracks joined, static phantom people set aside."""
+    """One label per track among confusable classes, broken tracks joined, static phantom people and second
+    boxes on the same person set aside."""
     _vote_labels(objects)
     _stitch(objects)
     _set_aside_static_people(objects)
+    _set_aside_duplicate_people(objects)
     return objects
