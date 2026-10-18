@@ -528,7 +528,7 @@ async function renderStates(id, generation) {
     if (e.action === "asked") {
       c.asked++;
       c.answers[e.answer] = (c.answers[e.answer] || 0) + 1;
-    } else if (e.action === "reused") c.reused++;
+    } else if (e.action === "reused" || e.action === "cooldown") c.reused++;
     else c.other++;
   }
   $("states-summary").textContent =
@@ -541,7 +541,7 @@ async function renderStates(id, generation) {
     c.other,
   ]);
   const rows = trace.entries
-    .filter((e) => e.action !== "reused" && e.action !== "too_small")
+    .filter((e) => !["reused", "cooldown", "too_small"].includes(e.action))
     .map((e) => {
       const time = el("button", clock(e.t));
       time.onclick = () => seek(e.t);

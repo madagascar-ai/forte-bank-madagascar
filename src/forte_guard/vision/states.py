@@ -42,9 +42,10 @@ QUESTIONS = {
         "is not visible.",
     ),
 }
-MARGIN = 0.12  # context around the box: a door edge or the screen border helps the model
-CHANGE = 12.0  # mean gray change (0-255) in the most changed 4x4 cell that counts as a new look
+MARGIN = 0.2  # context around the box: room for a swung door leaf, the frame edge, the screen border
+CHANGE = 18.0  # mean gray change (0-255) in the most changed 4x4 cell that counts as a new look
 STALE_SEC = 10.0  # re-check a steady object at least this often
+COOLDOWN_SEC = 1.0  # never re-read one object more often: a person moving in front must not eat the budget
 MIN_SIDE = 24  # pixels; smaller crops are not readable
 BUDGET_SEC = 30.0  # hard cap on the whole stage, on top of FORTE_STATES_MAX_CALLS
 # Same context as the other local-model calls: Ollama reloads the model whenever num_ctx changes.
@@ -87,6 +88,10 @@ def read_states(
         return []
     paths = {frame.frame_id: frame.image_path for frame in frames}
     cache: dict[str, tuple[np.ndarray, float, str | None]] = {}  # track -> (signature, time, state)
+    # These objects do not move: one fixed crop per track, so detector box jitter is not read as change.
+    anchors: dict[str, object] = {}
+    share = max(1, settings.states_max_calls // len(QUESTIONS))  # door, safe and laptop split the budget
+    label_calls: dict[str, int] = {}
     calls = reused = known = 0
     failures: set[str] = set()
     trace: list[dict] = []
@@ -108,7 +113,7 @@ def read_states(
         if image is None:
             continue
         for detection in targets:
-            crop = _crop(image, detection.box)
+            crop = _crop(image, anchors.setdefault(detection.track_id, detection.box))
             if crop is None:
                 record(frame, detection, "too_small")
                 continue
@@ -118,14 +123,20 @@ def read_states(
             unchanged = change is not None and change < CHANGE
             budget_left = (
                 calls < settings.states_max_calls
+                and label_calls.get(detection.label, 0) < share
                 and time.monotonic() - started < BUDGET_SEC
                 and deadline.remaining() > 60
             )
+            cooling = cached is not None and frame.timestamp_sec - cached[1] < COOLDOWN_SEC
             # A steady object keeps its state; it is re-read when it changes or, budget permitting, goes stale.
             if unchanged and (frame.timestamp_sec - cached[1] < STALE_SEC or not budget_left):
                 state, reused = cached[2], reused + 1
                 record(frame, detection, "reused", state, change)
+            elif cooling:
+                state, reused = cached[2], reused + 1
+                record(frame, detection, "cooldown", state, change)
             elif budget_left:
+                label_calls[detection.label] = label_calls.get(detection.label, 0) + 1
                 allowed, question = QUESTIONS[detection.label]
                 name = f"{frame.frame_id}_{detection.track_id}.jpg"
                 cv2.imwrite(str(workdir / name), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])

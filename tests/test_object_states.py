@@ -149,3 +149,21 @@ def test_state_crops_are_served_only_by_exact_name(settings):
         assert client.get(f"/api/v1/jobs/{'d' * 32}/state-crops/f000001_track_1.jpg", headers=headers).status_code == 200
         assert client.get(f"/api/v1/jobs/{'d' * 32}/state-crops/..%2Fresult.json", headers=headers).status_code == 404
         assert client.get(f"/api/v1/jobs/{'d' * 32}/state-crops/f000001_track_1.jpg").status_code == 401
+
+
+def test_detector_box_jitter_does_not_trigger_new_reads(settings, tmp_path):
+    settings.object_states = True
+    frames = [frame(tmp_path, i, i * 0.2, 200) for i in range(5)]
+    objects, model = journal(frames), Model("closed")
+    for i, f in enumerate(objects.frames):  # the same object, its box shifting a few pixels every frame
+        f.detections[0].box = Box(x1=0.2 + 0.01 * (i % 2), y1=0.2, x2=0.6 + 0.01 * (i % 2), y2=0.6)
+    read_states(frames, objects, settings, Deadline(300), tmp_path / "crops", ask=model)
+    assert model.calls == 1
+
+
+def test_an_object_that_keeps_changing_is_read_at_most_once_a_second(settings, tmp_path):
+    settings.object_states = True
+    frames = [frame(tmp_path, i, i * 0.2, 30 if i % 2 else 220) for i in range(10)]  # flickers every frame
+    objects, model = journal(frames), Model("closed")
+    read_states(frames, objects, settings, Deadline(300), tmp_path / "crops", ask=model)
+    assert model.calls == 2  # at 0.0 s and 1.0 s over two seconds of video
