@@ -110,3 +110,42 @@ def test_without_budget_a_steady_object_keeps_its_last_state(settings, tmp_path)
     assert model.calls == 1
     # Stale but unchanged keeps "closed"; a changed look with no budget left stays unknown.
     assert states(objects) == [["closed"], ["closed"], [None]]
+
+
+def test_every_decision_is_traced_with_the_crop_and_reason(settings, tmp_path):
+    import json
+
+    settings.object_states = True
+    frames = [frame(tmp_path, 0, 0.0, 200), frame(tmp_path, 1, 1.0, 200), frame(tmp_path, 2, 2.0, 30)]
+    objects = journal(frames)
+
+    def model(settings, prompt, schema, deadline, images, *args):
+        assert "reason" in schema["required"]
+        return {"state": "closed", "reason": "leaf flush with the frame"}
+
+    read_states(frames, objects, settings, Deadline(300), tmp_path / "job" / "state_crops", ask=model)
+    trace = json.loads((tmp_path / "job" / "state_trace.json").read_text())
+    actions = [e["action"] for e in trace["entries"]]
+    assert actions == ["asked", "reused", "asked"]
+    asked = trace["entries"][0]
+    assert asked["why"] == "first look" and asked["reason"] == "leaf flush with the frame"
+    assert (tmp_path / "job" / "state_crops" / asked["crop"]).is_file()
+    assert trace["entries"][2]["why"] == "changed" and trace["entries"][2]["change"] >= 12
+
+
+def test_state_crops_are_served_only_by_exact_name(settings):
+    from fastapi.testclient import TestClient
+
+    from forte_guard.api import create_app
+    from forte_guard.storage import JobStore
+
+    store = JobStore(settings.data_dir)
+    store.create("d" * 32, "x.mov")
+    crops = store.folder("d" * 32) / "state_crops"
+    crops.mkdir(parents=True, exist_ok=True)
+    (crops / "f000001_track_1.jpg").write_bytes(b"\xff\xd8\xff")
+    headers = {"X-API-Key": settings.api_key}
+    with TestClient(create_app(settings)) as client:
+        assert client.get(f"/api/v1/jobs/{'d' * 32}/state-crops/f000001_track_1.jpg", headers=headers).status_code == 200
+        assert client.get(f"/api/v1/jobs/{'d' * 32}/state-crops/..%2Fresult.json", headers=headers).status_code == 404
+        assert client.get(f"/api/v1/jobs/{'d' * 32}/state-crops/f000001_track_1.jpg").status_code == 401

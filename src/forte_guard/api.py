@@ -34,7 +34,9 @@ UI_COOKIE = "forte_ui"
 GUEST_COOKIE = "forte_guest"
 JOB_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 FRAME_PATTERN = re.compile(r"^f[0-9]{6}$")
+STATE_CROP_PATTERN = re.compile(r"^f[0-9]{6}_track_[0-9]+\.jpg$")
 ARTIFACTS = {
+    "state_trace",
     "frames",
     "metadata",
     "zones",
@@ -419,6 +421,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = store.folder(job_id) / "frames" / f"{frame_id}.jpg"
         if not path.is_file():
             raise HTTPException(404, "Кадр не найден")
+        return FileResponse(path, media_type="image/jpeg")
+
+    @app.get("/api/v1/jobs/{job_id}/state-crops/{name}")
+    def state_crop(job_id: str, name: str, auth: str = Depends(require_caller)):
+        # The exact crop the vision model saw when it read a door, safe or laptop state (debug view).
+        get_job(job_id)
+        check_owner(auth, job_id)
+        if not STATE_CROP_PATTERN.fullmatch(name):
+            raise HTTPException(404, "Вырезка не найдена")
+        path = store.folder(job_id) / "state_crops" / name
+        if not path.is_file():
+            raise HTTPException(404, "Вырезка не найдена")
         return FileResponse(path, media_type="image/jpeg")
 
     @app.get("/api/v1/jobs/{job_id}/video")

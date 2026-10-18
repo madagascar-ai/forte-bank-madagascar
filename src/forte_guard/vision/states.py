@@ -8,6 +8,7 @@ unknown is never turned into closed or off.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -65,9 +66,9 @@ def _signature(crop: np.ndarray) -> np.ndarray:
     return cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA).astype(np.float32)
 
 
-def _changed(current: np.ndarray, previous: np.ndarray) -> bool:
-    cells = np.abs(current - previous).reshape(4, 8, 4, 8).mean(axis=(1, 3))
-    return float(cells.max()) >= CHANGE
+def _change(current: np.ndarray, previous: np.ndarray) -> float:
+    """Mean gray change (0-255) in the most changed cell of a 4x4 grid over the crop."""
+    return float(np.abs(current - previous).reshape(4, 8, 4, 8).mean(axis=(1, 3)).max())
 
 
 def read_states(
@@ -78,15 +79,27 @@ def read_states(
     workdir: Path,
     ask: Callable[..., dict] = local_chat,
 ) -> list[str]:
-    """Set attributes["state"] on door, safe and laptop detections in place; return journal warnings."""
+    """Set attributes["state"] on door, safe and laptop detections in place; return journal warnings.
+
+    Every decision goes to state_trace.json next to the crops (team debug view; never in the jury result).
+    """
     if not settings.object_states:
         return []
     paths = {frame.frame_id: frame.image_path for frame in frames}
     cache: dict[str, tuple[np.ndarray, float, str | None]] = {}  # track -> (signature, time, state)
     calls = reused = known = 0
     failures: set[str] = set()
+    trace: list[dict] = []
     workdir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+
+    def record(frame, detection, action, state=None, change=None, **extra):
+        trace.append({
+            "t": frame.timestamp_sec, "frame_id": frame.frame_id, "track_id": detection.track_id,
+            "label": detection.label, "action": action, "state": state,
+            "change": None if change is None else round(change, 1), **extra,
+        })
+
     for frame in objects.frames:
         targets = [d for d in frame.detections if d.label in QUESTIONS and "state" not in d.attributes]
         if not targets or frame.frame_id not in paths:
@@ -97,10 +110,12 @@ def read_states(
         for detection in targets:
             crop = _crop(image, detection.box)
             if crop is None:
+                record(frame, detection, "too_small")
                 continue
             signature = _signature(crop)
             cached = cache.get(detection.track_id)
-            unchanged = cached is not None and not _changed(signature, cached[0])
+            change = None if cached is None else _change(signature, cached[0])
+            unchanged = change is not None and change < CHANGE
             budget_left = (
                 calls < settings.states_max_calls
                 and time.monotonic() - started < BUDGET_SEC
@@ -109,29 +124,46 @@ def read_states(
             # A steady object keeps its state; it is re-read when it changes or, budget permitting, goes stale.
             if unchanged and (frame.timestamp_sec - cached[1] < STALE_SEC or not budget_left):
                 state, reused = cached[2], reused + 1
+                record(frame, detection, "reused", state, change)
             elif budget_left:
                 allowed, question = QUESTIONS[detection.label]
-                path = workdir / f"{frame.frame_id}_{detection.track_id}.jpg"
-                cv2.imwrite(str(path), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                name = f"{frame.frame_id}_{detection.track_id}.jpg"
+                cv2.imwrite(str(workdir / name), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
                 schema = {
                     "type": "object",
-                    "properties": {"state": {"type": "string", "enum": [*allowed, "unknown"]}},
-                    "required": ["state"],
+                    "properties": {
+                        "state": {"type": "string", "enum": [*allowed, "unknown"]},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["state", "reason"],
                 }
+                prompt = question + " Also give a short reason, at most 12 words, naming what you see."
                 calls += 1
+                why = "first look" if cached is None else ("changed" if not unchanged else "stale")
                 try:
-                    answer = ask(settings, question, schema, deadline, [path], 30, CONTEXT, settings.states_model)
-                    state = answer.get("state") if answer.get("state") in allowed else None
+                    answer = ask(settings, prompt, schema, deadline, [workdir / name], 30, CONTEXT,
+                                 settings.states_model)
+                    raw = answer.get("state")
+                    state = raw if raw in allowed else None
+                    record(frame, detection, "asked", state, change, why=why, answer=raw,
+                           reason=str(answer.get("reason", ""))[:200], crop=name)
                 except Exception as exc:  # a failed read leaves the state unknown, never invented
                     failures.add(type(exc).__name__)
                     state = None
+                    record(frame, detection, "failed", None, change, why=why, error=type(exc).__name__, crop=name)
                 cache[detection.track_id] = (signature, frame.timestamp_sec, state)
             else:
+                record(frame, detection, "no_budget", None, change)
                 continue  # changed look and no budget left: leave this object unknown
             if state:
                 detection.attributes["state"] = state
                 detection.attributes["state_source"] = "local_vlm"
                 known += 1
+    (workdir.parent / "state_trace.json").write_text(json.dumps({
+        "model": settings.states_model, "max_calls": settings.states_max_calls, "budget_sec": BUDGET_SEC,
+        "change_threshold": CHANGE, "stale_sec": STALE_SEC, "calls": calls, "reused": reused,
+        "seconds": round(time.monotonic() - started, 1), "entries": trace,
+    }, ensure_ascii=False))
     notes = []
     if calls or reused:
         notes.append(

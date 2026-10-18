@@ -423,6 +423,7 @@ async function renderResult(result, generation, id) {
   $("frame-slider").max = Math.max(0, objects.frames.length - 1);
   $("frame-slider").value = 0;
   await renderFrame(0);
+  if (!S.guest) renderStates(id, generation);
   activateTab("findings");
   const blob = await (await api(`/api/v1/jobs/${id}/video`)).blob();
   if (generation !== S.generation) return;
@@ -502,8 +503,72 @@ function activateTab(name) {
   document
     .querySelectorAll(".tab")
     .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-  for (const n of ["findings", "actions", "objects", "candidates"])
+  for (const n of ["findings", "actions", "objects", "candidates", "states"])
     show("tab-" + n, n === name);
+}
+// Debug view of the object-states stage: every vision-model read with its crop, answer and reason.
+const stateLabels = { door: "Дверь", safe: "Сейф", laptop: "Ноутбук" };
+const stateWhy = { "first look": "первый взгляд", changed: "вид изменился", stale: "давно не проверяли" };
+const stateNames = { open: "открыта", closed: "закрыта", on: "включён", off: "выключен", unknown: "не видно" };
+async function renderStates(id, generation) {
+  let trace;
+  try {
+    trace = await json(`/api/v1/jobs/${id}/artifacts/state_trace`);
+  } catch {
+    $("states-summary").textContent = "шаг выключен (FORTE_OBJECT_STATES)";
+    $("states-table").replaceChildren();
+    return;
+  }
+  if (generation !== S.generation) return;
+  const counts = {};
+  for (const e of trace.entries) {
+    const key = stateLabels[e.label] || e.label;
+    counts[key] ??= { asked: 0, reused: 0, other: 0, answers: {} };
+    const c = counts[key];
+    if (e.action === "asked") {
+      c.asked++;
+      c.answers[e.answer] = (c.answers[e.answer] || 0) + 1;
+    } else if (e.action === "reused") c.reused++;
+    else c.other++;
+  }
+  $("states-summary").textContent =
+    `${trace.model} · ${trace.calls} запросов, ${trace.reused} повторов, ${trace.seconds} с`;
+  const summaryRows = Object.entries(counts).map(([label, c]) => [
+    label,
+    c.asked,
+    Object.entries(c.answers).map(([a, n]) => `${stateNames[a] || a}: ${n}`).join(", "),
+    c.reused,
+    c.other,
+  ]);
+  const rows = trace.entries
+    .filter((e) => e.action !== "reused" && e.action !== "too_small")
+    .map((e) => {
+      const time = el("button", clock(e.t));
+      time.onclick = () => seek(e.t);
+      const crop = el("span");
+      if (e.crop) {
+        const img = el("img", null, "state-crop");
+        img.alt = "вырезка " + e.crop;
+        crop.append(img);
+        api(`/api/v1/jobs/${id}/state-crops/${e.crop}`)
+          .then((r) => r.blob())
+          .then((b) => (img.src = URL.createObjectURL(b)))
+          .catch(() => (img.alt = "нет файла"));
+      }
+      return [
+        time,
+        `${stateLabels[e.label] || e.label} · ${e.track_id}`,
+        e.action === "asked" ? stateWhy[e.why] || e.why : e.action === "no_budget" ? "нет лимита" : "сбой",
+        e.action === "asked" ? stateNames[e.answer] || e.answer : e.error || "—",
+        e.reason || "",
+        e.change ?? "—",
+        crop,
+      ];
+    });
+  $("states-table").replaceChildren(
+    table(["Объект", "Запросов", "Ответы", "Повторов", "Нет лимита / сбой"], summaryRows),
+    table(["Время", "Объект", "Почему спросили", "Ответ", "Пояснение модели", "Изменение", "Вырезка"], rows),
+  );
 }
 document
   .querySelectorAll(".tab")

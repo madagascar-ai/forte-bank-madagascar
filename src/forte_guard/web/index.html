@@ -90,7 +90,8 @@
             <button class="tab active" data-tab="findings">Результат</button
             ><button class="tab" data-tab="actions">Журнал действий</button
             ><button class="tab" data-tab="objects">Объекты и треки</button
-            ><button class="tab" data-tab="candidates">Кандидаты</button>
+            ><button class="tab" data-tab="candidates">Кандидаты</button
+            ><button class="tab" data-tab="states">Состояния</button>
           </div>
           <section id="tab-findings">
             <div id="findings"></div>
@@ -140,6 +141,20 @@
                 В MVP выполнена только проверка структуры и ссылок.
               </p>
               <pre id="candidates-json"></pre>
+            </div>
+          </section>
+          <section id="tab-states" class="hidden">
+            <div class="card">
+              <div class="section-heading">
+                <h3>Состояния двери, сейфа и ноутбука</h3>
+                <span id="states-summary"></span>
+              </div>
+              <p id="states-note">
+                Каждый запрос к локальной vision-модели: что она видела (вырезка),
+                что ответила и почему. Между запросами ответ переиспользуется, пока
+                вырезка почти не меняется.
+              </p>
+              <div id="states-table" class="table-scroll"></div>
             </div>
           </section>
         </div>

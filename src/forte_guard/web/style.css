@@ -806,3 +806,13 @@ footer {
   background: var(--accent-soft);
   color: var(--accent);
 }
+.state-crop {
+  display: block;
+  max-width: 120px;
+  max-height: 120px;
+  border-radius: 8px;
+  background: #1d0b13;
+}
+#states-table table + table {
+  margin-top: 18px;
+}
