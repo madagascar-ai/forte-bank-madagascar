@@ -103,14 +103,17 @@ def assign_roles(objects: ObjectJournal, profile: ZoneProfile) -> dict[str, str]
             if item.label != "person":
                 votes[item.track_id].append(item.label)
             elif len(votes[item.track_id]) < 10:
+                # Only where the person stands counts: a client walking in through the door would
+                # otherwise collect "unknown" votes on the way and never become a client.
                 if person_in_zone(item, profile, "cashier_area"):
                     votes[item.track_id].append("cashier")
                 elif person_in_zone(item, profile, "client_area"):
                     votes[item.track_id].append("client")
-                else:
-                    votes[item.track_id].append("unknown")
     roles = {}
     for track_id, values in votes.items():
+        if not values:  # never stood in either area
+            roles[track_id] = "unknown"
+            continue
         role, count = Counter(values).most_common(1)[0]
         roles[track_id] = role if count / len(values) >= 0.7 else "unknown"
     return roles

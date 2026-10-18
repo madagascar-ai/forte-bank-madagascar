@@ -369,3 +369,20 @@ def test_a_document_seen_for_one_sample_does_not_excuse_the_id_check(settings):
     assert len(_id_check_candidates(journal, settings)) == 1
     objects, profile = _with_counter(_counter_then_cashier(extra=flicker))
     assert _id_check_candidates(build_journal(objects, profile, 5, 5), settings) == []
+
+
+def test_a_client_walking_in_through_the_door_is_still_a_client():
+    # The first samples are on the way in, outside both areas; the role comes from where they stand.
+    walking_in = ("visitor", "person", [0.42, 0.3, 0.58, 0.6])
+    standing = ("visitor", "person", [0.65, 0.1, 0.95, 0.8])
+    frames = [[CASHIER, walking_in] for _ in range(4)] + [[CASHIER, standing] for _ in range(16)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 4, 5)
+    assert journal.roles["visitor"] == "client"
+    assert [event.actor_ids for event in journal.actions if event.type == "client_observed"] == [["visitor"]]
+
+
+def test_a_person_who_never_stands_in_either_area_stays_unknown():
+    frames = [[CASHIER, ("passerby", "person", [0.42, 0.3, 0.58, 0.6])] for _ in range(10)]
+    objects, profile = _scene(frames)
+    assert build_journal(objects, profile, 2, 5).roles["passerby"] == "unknown"
