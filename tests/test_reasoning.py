@@ -1,7 +1,7 @@
 from forte_guard.contracts import Action, ActionJournal, Candidate, Frame, Rule
 from forte_guard.reasoning.catalog import load_catalog
 from forte_guard.reasoning.rules import rule_candidates
-from forte_guard.reasoning.validation import merge_candidates, validate_candidates
+from forte_guard.reasoning.validation import collapse_repeats, merge_candidates, validate_candidates
 
 
 def action(event_id, kind, batch, start, end):
@@ -102,6 +102,19 @@ def test_merge_keeps_provenance_but_separates_repeated_episodes():
     assert len(merged) == 3
     both = next(item for item in merged if len(item.sources) == 2)
     assert both.sources == ["rule_engine", "llm"]
+
+
+def test_pieces_of_one_situation_show_as_one_violation():
+    # Hands covering the cash for a second split one state into pieces; a longer break or another
+    # session is a separate violation.
+    pieces = [candidate(1, 2), candidate(3, 4), candidate(4.2, 6), candidate(9, 10), candidate(1, 2, session="s2")]
+    kept = collapse_repeats(pieces)
+    assert [(item.session_id, item.start_sec, item.end_sec) for item in kept] == [
+        ("s1", 1, 6),
+        ("s1", 9, 10),
+        ("s2", 1, 2),
+    ]
+    assert pieces[1].status == "rejected" and pieces[1].verification == "repeat_of_test"
 
 
 def test_validator_rejects_unknown_event_and_invented_timestamp(settings):

@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from ..contracts import ActionJournal, Candidate, Frame, Rule
 
+# One situation broken for a moment (hands covering the cash, a box lost for a few samples) comes out of
+# the rules as several pieces, each checked on its own; accepted pieces of the same rule and session closer
+# than this are shown as one violation, from the first piece.
+REPEAT_GAP_SEC = 1.5
+
 
 def merge_candidates(candidates: list[Candidate]) -> list[Candidate]:
     merged = []
@@ -133,4 +138,18 @@ def validate_candidates(
         accepted.append(item)
         if rule.source_status != "verified":
             warnings.append(f"Ссылка на норму для «{rule.title}» предварительная: проверьте редакцию и применимость.")
-    return accepted, list(dict.fromkeys(warnings))
+    return collapse_repeats(accepted), list(dict.fromkeys(warnings))
+
+
+def collapse_repeats(accepted: list[Candidate]) -> list[Candidate]:
+    kept, last = [], {}
+    for item in accepted:  # merge_candidates sorted them by rule and start
+        key = (item.rule_id, item.session_id)
+        previous = last.get(key)
+        if previous is not None and item.start_sec - previous.end_sec <= REPEAT_GAP_SEC:
+            previous.end_sec = max(previous.end_sec, item.end_sec)
+            item.status, item.verification = "rejected", f"repeat_of_{previous.candidate_id}"
+            continue
+        last[key] = item
+        kept.append(item)
+    return kept
