@@ -196,6 +196,18 @@ main {
   max-width: 1100px;
   margin: 0 auto;
   padding: 44px 32px 24px;
+  /* The footer sits at the bottom of the window when the page is short. */
+  min-height: calc(100vh - 76px);
+  display: flex;
+  flex-direction: column;
+}
+main::after {
+  content: "";
+  flex: 1;
+  order: 1;
+}
+main > footer {
+  order: 2;
 }
 .page-header {
   margin-bottom: 28px;
