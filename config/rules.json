@@ -369,6 +369,7 @@
     },
     {
       "id": "cash_retrieved_in_pieces",
+      "enabled": false,
       "title": "Сомнительные банкноты не оформлены актом",
       "kind": "action",
       "source_status": "needs_review",
