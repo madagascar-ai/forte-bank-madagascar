@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from ..contracts import ActionJournal, Candidate, Frame, Rule
 
+# One situation broken for a moment (hands covering the cash, a box lost for a few samples) comes out of
+# the rules as several pieces, each checked on its own; accepted pieces of the same rule and session closer
+# than this are shown as one violation, from the first piece.
+REPEAT_GAP_SEC = 1.5
+
 
 def merge_candidates(candidates: list[Candidate]) -> list[Candidate]:
     merged = []
@@ -69,7 +74,7 @@ def validate_candidates(
         )
         if not valid:
             item.status, item.verification = "rejected", "invalid_references_or_interval"
-            warnings.append("Кандидат с некорректными ссылками или интервалом отброшен.")
+            warnings.append("Одно из возможных нарушений отброшено: некорректные ссылки или интервал.")
             continue
         rule = rule_map[item.rule_id]
         refs = [*[event_map[key] for key in item.event_ids], *[state_map[key] for key in item.state_ids]]
@@ -118,7 +123,7 @@ def validate_candidates(
             supported = all(journal.coverage.get(flag) for flag in engine.get("required_context_flags", []))
         if not supported:
             item.status, item.verification = "rejected", "observations_do_not_support_rule"
-            warnings.append("Кандидат отброшен: связанные наблюдения не подтверждают условия правила.")
+            warnings.append("Одно из возможных нарушений отброшено: наблюдения не подтверждают условия.")
             continue
         # Pick a real decoded frame, not a numeric timestamp invented by a model.
         witness = min(
@@ -132,5 +137,19 @@ def validate_candidates(
         item.status, item.verification = "accepted", "structural_only"
         accepted.append(item)
         if rule.source_status != "verified":
-            warnings.append(f"Нормативная привязка {rule.id} требует проверки редакции и применимости.")
-    return accepted, list(dict.fromkeys(warnings))
+            warnings.append(f"Ссылка на норму для «{rule.title}» предварительная: проверьте редакцию и применимость.")
+    return collapse_repeats(accepted), list(dict.fromkeys(warnings))
+
+
+def collapse_repeats(accepted: list[Candidate]) -> list[Candidate]:
+    kept, last = [], {}
+    for item in accepted:  # merge_candidates sorted them by rule and start
+        key = (item.rule_id, item.session_id)
+        previous = last.get(key)
+        if previous is not None and item.start_sec - previous.end_sec <= REPEAT_GAP_SEC:
+            previous.end_sec = max(previous.end_sec, item.end_sec)
+            item.status, item.verification = "rejected", f"repeat_of_{previous.candidate_id}"
+            continue
+        last[key] = item
+        kept.append(item)
+    return kept

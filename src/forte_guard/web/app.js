@@ -360,9 +360,11 @@ async function renderResult(result, generation, id) {
       evidence.append(f);
     }
     card.append(evidence);
+    const sourceNames = { rule_engine: "правила", llm: "языковая модель" };
     const source = el(
       "p",
-      "Источники кандидата: " + finding.sources.join(", "),
+      "Как найдено: " +
+        finding.sources.map((s) => sourceNames[s] || s).join(" + "),
       "source",
     );
     if (finding.document?.url) {

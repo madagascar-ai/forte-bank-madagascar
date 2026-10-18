@@ -130,3 +130,23 @@ def test_people_that_move_or_are_full_size_are_kept():
     frames = [[CASHIER, still_client, passing_small[i], *([brief_small] if i < 5 else [])] for i in range(20)]
     objects = repair_tracks(_objects(frames))
     assert _track_ids(objects, "static_person") == set()
+
+
+SEATED_TO_DESK = ("cashier", "person", [0.1, 0.3, 0.3, 0.5], 0.92)
+SEATED_WITH_LEGS = ("legs", "person", [0.1, 0.3, 0.3, 0.6], 0.8)
+
+
+def test_second_box_on_a_seated_person_is_set_aside():
+    # Seen from the front, a seated cashier gets a box down to the desk and another down to the legs
+    # under it: the shorter track is the same person, not someone else at the workstation.
+    frames = [[SEATED_TO_DESK, SEATED_WITH_LEGS] for _ in range(10)] + [[SEATED_TO_DESK] for _ in range(10)]
+    objects = repair_tracks(_objects(frames))
+    assert _track_ids(objects, "person") == {"cashier"}
+    assert _track_ids(objects, "duplicate_person") == {"legs"}
+    assert "legs" not in build_journal(objects, PROFILE, 4, 5).roles
+
+
+def test_people_overlapping_side_by_side_are_both_kept():
+    visitor = ("visitor", "person", [0.2, 0.25, 0.42, 0.6], 0.9)  # half of the cashier's box overlaps
+    objects = repair_tracks(_objects([[SEATED_TO_DESK, visitor] for _ in range(10)]))
+    assert _track_ids(objects, "person") == {"cashier", "visitor"}
