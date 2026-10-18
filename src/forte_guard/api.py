@@ -51,6 +51,15 @@ ARTIFACTS = {
 }
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """Interface assets revalidate on every load (a cheap 304), so a deploy never meets a stale app.js."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     settings.validate()
@@ -461,7 +470,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     web = Path(__file__).parent / "web"
-    app.mount("/assets", StaticFiles(directory=web), name="assets")
+    app.mount("/assets", RevalidatedStaticFiles(directory=web), name="assets")
 
     @app.get("/", include_in_schema=False)
     def index(request: Request):

@@ -87,3 +87,11 @@ def test_default_interface_still_asks_for_the_key(settings):
         assert "set-cookie" not in client.get("/").headers
         assert client.get("/api/v1/access").json()["authorized"] is False
         assert client.get("/api/v1/jobs").status_code == 401
+
+
+def test_interface_assets_revalidate_so_a_deploy_is_never_hidden_by_the_cache(settings):
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/assets/app.js")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["etag"]
