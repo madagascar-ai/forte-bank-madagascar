@@ -136,6 +136,10 @@ $("new-job").onclick = () => {
   S.generation++;
   S.job = null;
   S.result = null;
+  // A new check starts empty: the previous video stays out of the form.
+  S.file = null;
+  $("video-file").value = "";
+  $("file-title").textContent = "Выберите видео или перетащите сюда";
   navigate("upload-view");
   if (S.videoURL) {
     URL.revokeObjectURL(S.videoURL);
