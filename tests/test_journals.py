@@ -386,3 +386,43 @@ def test_a_person_who_never_stands_in_either_area_stays_unknown():
     frames = [[CASHIER, ("passerby", "person", [0.42, 0.3, 0.58, 0.6])] for _ in range(10)]
     objects, profile = _scene(frames)
     assert build_journal(objects, profile, 2, 5).roles["passerby"] == "unknown"
+
+
+def test_cash_left_by_an_earlier_client_is_not_a_handover_from_the_next(settings):
+    # The stack lies on the counter while client A is there, A leaves, B arrives, then the cashier
+    # takes the stack: B never handed it over.
+    client_b = ("client_b", "person", [0.65, 0.1, 0.95, 0.8])
+    frames = [[CASHIER, CLIENT, STACK_ON_COUNTER] for _ in range(10)] + [[CASHIER, STACK_ON_COUNTER] for _ in range(20)]
+    frames += [[CASHIER, client_b, STACK_ON_COUNTER] for _ in range(5)] + [[CASHIER, client_b, STACK_AT_CASHIER] for _ in range(5)]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 8, 5)
+    assert _transfers(journal) == []
+    assert _id_check_candidates(journal, settings) == []
+
+
+def test_cash_first_seen_in_the_counting_machine_is_not_a_handover():
+    machine = ("machine", "counter", [0.44, 0.42, 0.58, 0.56])
+    frames = [[CASHIER, CLIENT, machine] for _ in range(10)] + [[CASHIER, CLIENT, machine, STACK_ON_COUNTER] for _ in range(5)]
+    frames += [[CASHIER, CLIENT, machine] for _ in range(2)] + [[CASHIER, CLIENT, machine, STACK_AT_CASHIER] for _ in range(5)]
+    objects, profile = _with_counter(frames)
+    assert _transfers(build_journal(objects, profile, 5, 5)) == []
+
+
+def test_a_flickering_document_still_counts_as_shown(settings):
+    # Seen on every other sample: real, just flickering. It excuses the cash pickup.
+    document = ("doc", "document", [0.7, 0.45, 0.75, 0.5])
+    frames = _counter_then_cashier()
+    for index in (2, 4, 6, 8):
+        frames[index] = [*frames[index], document]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    assert any(event.type == "document_presented" for event in journal.actions)
+    assert _id_check_candidates(journal, settings) == []
+
+
+def test_a_passer_by_grazing_the_cashier_area_once_is_not_a_cashier():
+    grazing = ("passerby", "person", [0.3, 0.3, 0.45, 0.6])  # centre inside the cashier area
+    outside = ("passerby", "person", [0.42, 0.3, 0.58, 0.6])
+    frames = [[CASHIER, grazing]] + [[CASHIER, outside] for _ in range(30)]
+    objects, profile = _scene(frames)
+    assert build_journal(objects, profile, 6, 5).roles["passerby"] == "unknown"

@@ -54,6 +54,11 @@ WORKSTATION_ZONES = {"cashier_area", "counter_area"}
 # so it's otherwise dead); this zone-trajectory fallback covers client-area objects crossing over.
 CLIENT_ITEM_LABELS = {"phone", "personal_item"}
 CLIENT_HANDOFF_GRACE_SEC = 5.0
+# A detected document counts as shown from this many samples of its track.
+DOCUMENT_MIN_SAMPLES = 2
+# A role needs this many samples standing in an area, or this share of the person's samples.
+MIN_ROLE_VOTES = 3
+MIN_ROLE_SHARE = 0.3
 # Presence mode "zone": an empty workstation counts as an absence only after this wait. Vanishing in the
 # middle of the area is more likely bending down or occlusion than leaving, so it waits longer.
 ABSENT_MIN_SEC = 3.0
@@ -96,10 +101,12 @@ def person_in_zone(item: Detection, profile: ZoneProfile, name: str) -> bool:
 
 def assign_roles(objects: ObjectJournal, profile: ZoneProfile) -> dict[str, str]:
     votes = defaultdict(list)
+    samples = Counter()
     for frame in objects.frames:
         for item in frame.detections:
             if item.label not in {"person", "cashier", "client"}:
                 continue
+            samples[item.track_id] += 1
             if item.label != "person":
                 votes[item.track_id].append(item.label)
             elif len(votes[item.track_id]) < 10:
@@ -111,7 +118,8 @@ def assign_roles(objects: ObjectJournal, profile: ZoneProfile) -> dict[str, str]
                     votes[item.track_id].append("client")
     roles = {}
     for track_id, values in votes.items():
-        if not values:  # never stood in either area
+        # A passer-by whose box grazes an area once is not placed there.
+        if len(values) < MIN_ROLE_VOTES and len(values) < MIN_ROLE_SHARE * samples[track_id]:
             roles[track_id] = "unknown"
             continue
         role, count = Counter(values).most_common(1)[0]
@@ -295,6 +303,7 @@ def build_journal(
     last_known_side = {}
     last_money: dict[str, tuple] = {}  # last raw observation of each cash track
     counter_cash: dict[str, dict] = {}  # client cash first seen on the counter, until picked up
+    document_samples: Counter = Counter()
     locations = {}
     first_location: dict[str, str | None] = {}
     object_states = {}
@@ -319,11 +328,12 @@ def build_journal(
         "complete_observation": False,
     }
 
-    def received_from_client(batch, action, frame):
-        if active_session:
-            batch.session_id = active_session
+    def received_from_client(batch, action, frame, session=None):
+        session = session or active_session
+        if session:
+            batch.session_id = session
             batch.provenance = "observed"
-            service_sessions.add(active_session)
+            service_sessions.add(session)
             state("service_active", True, frame, source_events=[action.event_id])
 
     def event(
@@ -396,7 +406,6 @@ def build_journal(
             smoothers[(track_id, "state")].update(None)
             smoothers[(track_id, "owner")].update(None)
             smoothers[(track_id, "side")].update(None)
-            smoothers[(track_id, "document")].update(None)
         clients = [
             p
             for p in people
@@ -623,8 +632,10 @@ def build_journal(
             if item.label == "document":
                 # No hand contact available: attribute to whichever client is nearest right now,
                 # not to "whoever's hand is on it" — session-scoped, not person-scoped. A single-sample
-                # "document" is usually a misread stack or paper, and would excuse a missing ID check.
-                _, shown = smoothers[(item.track_id, "document")].update(True)
+                # "document" is usually a misread stack or paper, and would excuse a missing ID check;
+                # a real one may flicker, so its samples need not be consecutive.
+                document_samples[item.track_id] += 1
+                shown = document_samples[item.track_id] >= DOCUMENT_MIN_SAMPLES
                 nearest_session = _nearest_session(item.box.center, clients, sessions, active_session)
                 contact_key = (item.track_id, nearest_session)
                 if shown and nearest_session and contact_key not in emitted_device_contacts:
@@ -670,7 +681,8 @@ def build_journal(
                     received_from_client(batch, action, frame)
             if item.track_id not in first_location:
                 first_location[item.track_id] = location
-                if location == "counter_area" and clients:
+                # Cash first seen inside the counting machine is being counted, not put down by the client.
+                if location == "counter_area" and clients and not any(_overlaps(item, c) for c in counters):
                     counter_cash[item.track_id] = {
                         "frame": frame,
                         "last_sec": frame.timestamp_sec,
@@ -681,7 +693,12 @@ def build_journal(
                 pending["last_sec"] = frame.timestamp_sec
             elif pending and location == "cashier_area":
                 del counter_cash[item.track_id]
-                if frame.timestamp_sec - pending["last_sec"] <= HANDOFF_WINDOW_SEC:
+                # The client who put it down must still be the one served: cash left from an earlier
+                # client and picked up later is not a handover from the next one.
+                if (
+                    frame.timestamp_sec - pending["last_sec"] <= HANDOFF_WINDOW_SEC
+                    and pending["session"] == active_session
+                ):
                     action = event(
                         "cash_transferred",
                         frame,
@@ -694,7 +711,7 @@ def build_journal(
                         session=pending["session"],
                     )
                     action.evidence_frame_ids = list(dict.fromkeys([pending["frame"].frame_id, frame.frame_id]))
-                    received_from_client(batch, action, frame)
+                    received_from_client(batch, action, frame, pending["session"])
             if stable_side:
                 last_known_side[item.track_id] = (stable_side, frame.timestamp_sec, frame.frame_id)
             last_money[item.track_id] = (side, frame, item, clients)
