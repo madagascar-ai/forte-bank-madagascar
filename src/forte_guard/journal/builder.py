@@ -208,12 +208,14 @@ class ZonePresence:
         exit_area: Box | None,
         min_wait: float = ABSENT_MIN_SEC,
         midzone_wait: float = ABSENT_MIDZONE_SEC,
+        hold_margin: float = 0.0,
     ):
         self.required = required
         self.area = area
         self.exit_area = exit_area
         self.min_wait = min_wait
         self.midzone_wait = midzone_wait
+        self.hold_margin = hold_margin
         self.value = None
         self.pending = None
         self.count = 0
@@ -229,10 +231,15 @@ class ZonePresence:
         near_edge = min(x - a.x1, a.x2 - x, y - a.y1, a.y2 - y) <= ZONE_EDGE_MARGIN
         return near_edge or bool(self.exit_area and self.exit_area.contains(point))
 
+    def _holds(self, point: tuple[float, float]) -> bool:
+        x, y = point
+        a, m = self.area, self.hold_margin
+        return a.x1 - m <= x <= a.x2 + m and a.y1 - m <= y <= a.y2 + m
+
     def observe(self, t: float, people: list[Detection], hands: list[Detection], walked_away: bool, alive: bool):
         if self.area is None:
             return None
-        inside = [p for p in people if self.area.contains(p.box.center)]
+        inside = [p for p in people if self._holds(p.box.center)]
         if inside or any(self.area.contains(h.box.center) for h in hands):
             self.seen, self.last_in, self.empty_since = True, t, None
             if inside:
@@ -347,8 +354,14 @@ def build_journal(
     smoothers = defaultdict(lambda: StableValue(required))
     areas = {zone.name: zone.box for zone in profile.zones}
     workstation = ZonePresence(required, areas.get("cashier_area"), areas.get("exit_area"))
+    # A client sitting down or leaning over the counter can put their box centre just past the edge of
+    # the client area; still in view and that close, they have not walked away.
     client_station = ZonePresence(
-        required, areas.get("client_area"), areas.get("exit_area"), midzone_wait=CLIENT_ABSENT_MIDZONE_SEC
+        required,
+        areas.get("client_area"),
+        areas.get("exit_area"),
+        midzone_wait=CLIENT_ABSENT_MIDZONE_SEC,
+        hold_margin=ZONE_EDGE_MARGIN,
     )
     open_states: dict[tuple, State] = {}
     evidence_marked_at: dict[tuple, float] = {}

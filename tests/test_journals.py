@@ -463,6 +463,23 @@ def test_client_staying_through_the_recount_is_not_flagged(settings):
     assert not any(c.rule_id == "client_left_before_count_complete" for c in candidates)
 
 
+LEANING_OVER_COUNTER = [0.47, 0.1, 0.71, 0.8]  # box centre 0.01 short of the client area
+
+
+def test_client_leaning_just_past_the_area_edge_has_not_left(settings):
+    # Sitting down or leaning over the counter moves the client's box centre a hair past the edge of
+    # the client area; in view and that close, the client is still at the counter.
+    frames = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)] + [
+        [("client", "person", LEANING_OVER_COUNTER), COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(30)
+    ]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 9, 5, presence="zone")
+    assert _client_departures(journal) == []
+    rules, scenarios = load_catalog(settings.config_dir)
+    candidates = rule_candidates(journal, rules, scenarios)
+    assert not any(c.rule_id == "client_left_before_count_complete" for c in candidates)
+
+
 def test_client_vanishing_mid_area_confirms_after_the_shorter_client_wait():
     # A client vanishing mid-area (not visibly walking off) is still a deliberate wait, just
     # shorter than the cashier's own tuned 6s — missing a witnessed recount matters more. A brief
