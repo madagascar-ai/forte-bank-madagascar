@@ -55,6 +55,27 @@ def test_safe_left_open_is_reported_at_the_threshold_not_the_opening(settings):
     assert len(found) == 1 and found[0].timecode_sec == 10
 
 
+def test_safe_or_door_seen_closed_again_soon_is_a_routine_operation(settings):
+    # Opened for 7 s to take cash out, then clearly closed: not "left open".
+    journal = journal_with([("safe_door_state", "open", 117.0, 124.2), ("safe_door_state", "closed", 124.2, 140)],
+                           duration=142)
+    assert not [c for c in run_rules(journal, settings) if c.rule_id == "safe_left_open"]
+    journal = journal_with([("door_door_state", "open", 3, 10), ("door_door_state", "closed", 10.2, 20)])
+    assert not [c for c in run_rules(journal, settings) if c.rule_id == "cash_room_door_open"]
+
+
+def test_safe_never_seen_closed_or_open_too_long_is_still_reported(settings):
+    # Open until the clip ends, or out of sight after opening: losing sight is not a closing.
+    for states in ([("safe_door_state", "open", 4, 20)], [("safe_door_state", "open", 4, 12)]):
+        assert [c for c in run_rules(journal_with(states), settings) if c.rule_id == "safe_left_open"]
+    # Closed eventually, but open 40 s: that is leaving it open.
+    journal = journal_with([("safe_door_state", "open", 5, 45), ("safe_door_state", "closed", 45, 60)], duration=60)
+    assert [c for c in run_rules(journal, settings) if c.rule_id == "safe_left_open"]
+    # A closing far later than the open interval's end does not excuse it.
+    journal = journal_with([("safe_door_state", "open", 4, 12), ("safe_door_state", "closed", 16, 20)])
+    assert [c for c in run_rules(journal, settings) if c.rule_id == "safe_left_open"]
+
+
 def test_unattended_cash_yields_to_departure_during_service(settings):
     journal = journal_with(
         [("cash_on_counter", True, 5, 15), ("cashier_present", False, 6, 15)]

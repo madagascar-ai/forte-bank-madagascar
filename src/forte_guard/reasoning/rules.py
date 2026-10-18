@@ -27,6 +27,25 @@ def _candidate(rule, events, states, start, end, anchor, reason):
     )
 
 
+def _closed_right_after(journal: ActionJournal, engine: dict, states, end: float) -> bool:
+    """True if the engine's closing state (e.g. safe_door_state=closed) is clearly observed as the open
+    interval ends. Losing sight of the object, or the clip ending, is not a closing."""
+    closing = engine.get("unless_followed_by")
+    if not closing:
+        return False
+    step = 1 / journal.sample_fps + 0.05
+    return all(
+        any(
+            state.name == name
+            and state.value == value
+            and state.visibility == "clear"
+            and end - step <= state.start_sec <= end + 1.5
+            for state in journal.states
+        )
+        for name, value in closing.items()
+    )
+
+
 def rule_candidates(journal: ActionJournal, rules: list[Rule], scenarios: dict) -> list[Candidate]:
     """Pure code; no model calls. Unknown observations never satisfy a negative condition."""
     found = []
@@ -72,6 +91,10 @@ def rule_candidates(journal: ActionJournal, rules: list[Rule], scenarios: dict) 
             for start, end, states, session in intervals:
                 if end - start < engine.get("min_duration_sec", 0):
                     continue
+                if _closed_right_after(journal, engine, states, end) and (
+                    end - start < engine.get("unless_open_sec", float("inf"))
+                ):
+                    continue  # opened and seen closed again soon: a routine operation, not left open
                 anchor_events = [
                     event
                     for event in journal.actions
