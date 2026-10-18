@@ -29,6 +29,20 @@ def keep_strongest(detections: list[Detection], labels: set[str]) -> list[Detect
     return [d for d in detections if d.label not in labels or best[d.label] is d]
 
 
+def split_state(label: str, state_classes: dict, defaults: dict) -> tuple[str, dict]:
+    """Class name -> (object label, state attributes). door_open is a door seen open; a plain door from
+    weights that also know door_open was seen not open, so it gets the default. Other weights give no state."""
+    if label in state_classes:
+        base, state = state_classes[label]
+        return base, {"state": state, "state_source": "detector"}
+    for suffix in ("_open", "_closed"):  # zero-shot prompts such as door_closed
+        if label.endswith(suffix):
+            return label.removesuffix(suffix), {"state": suffix[1:]}
+    if label in defaults:
+        return label, {"state": defaults[label], "state_source": "detector"}
+    return label, {}
+
+
 class YoloTracker:
     """One model/tracker instance per video: track IDs never leak across jobs."""
 
@@ -57,6 +71,14 @@ class YoloTracker:
         self.single_instance = set(config.get("single_instance", []))
         self.names = list(self.model.names.values())
         self.prompt_to_class = {text: label for label, text in config.get("prompts", {}).items()}
+        self.state_classes = {
+            name: tuple(pair) for name, pair in config.get("state_classes", {}).items() if name in self.names
+        }
+        # A default state only when these weights can also say the opposite.
+        trained = {base for base, _ in self.state_classes.values()}
+        self.state_defaults = {
+            label: state for label, state in config.get("state_defaults", {}).items() if label in trained
+        }
         if settings.detector in OPEN_VOCABULARY and set(self.names) != set(self.prompt_to_class):
             raise ValueError("Словарь весов не совпадает с config/detector.json; повторите prepare_models.py")
 
@@ -85,12 +107,7 @@ class YoloTracker:
                 ):
                     raw = self.model.names[int(label_index)]
                     label = self.prompt_to_class.get(raw, self.aliases.get(raw, raw))
-                    attributes = {}
-                    for suffix in ("_open", "_closed"):
-                        if label.endswith(suffix):
-                            attributes["state"] = suffix[1:]
-                            label = label.removesuffix(suffix)
-                            break
+                    label, attributes = split_state(label, self.state_classes, self.state_defaults)
                     coordinates = [max(0.0, min(1.0, float(v))) for v in xyxy]
                     if coordinates[2] <= coordinates[0] or coordinates[3] <= coordinates[1]:
                         continue
@@ -113,7 +130,10 @@ class YoloTracker:
             )
             if index % 10 == 0 or index == len(frames) - 1:
                 progress((index + 1) / len(frames))
-        classes = [self.prompt_to_class.get(name, self.aliases.get(name, name)) for name in self.names]
+        classes = list(dict.fromkeys(
+            split_state(self.prompt_to_class.get(name, self.aliases.get(name, name)), self.state_classes, {})[0]
+            for name in self.names
+        ))
         return ObjectJournal(
             backend=f"{self.settings.detector}+bytetrack",
             supported_classes=classes,

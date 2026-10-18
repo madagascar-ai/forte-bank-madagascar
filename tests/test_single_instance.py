@@ -33,3 +33,21 @@ def test_frames_without_single_instance_labels_pass_through():
 def test_door_is_configured_as_single_instance():
     config = json.loads((ROOT / "config" / "detector.json").read_text())
     assert "door" in config["single_instance"]
+
+
+def test_state_classes_become_a_state_on_the_plain_object():
+    from forte_guard.vision.detector import split_state
+
+    config = json.loads((ROOT / "config" / "detector.json").read_text())
+    classes = {name: tuple(pair) for name, pair in config["state_classes"].items()}
+    defaults = config["state_defaults"]
+    assert split_state("door_open", classes, defaults) == ("door", {"state": "open", "state_source": "detector"})
+    assert split_state("laptop_on", classes, defaults) == ("laptop", {"state": "on", "state_source": "detector"})
+    # Weights that know door_open saw this door not open; the plain class takes the default.
+    assert split_state("door", classes, defaults) == ("door", {"state": "closed", "state_source": "detector"})
+    assert split_state("laptop", classes, defaults)[1]["state"] == "off"
+    # Weights without state classes give no state at all: unknown is not closed.
+    assert split_state("door", {}, {}) == ("door", {})
+    assert split_state("person", classes, defaults) == ("person", {})
+    # Zero-shot prompts keep working.
+    assert split_state("door_closed", {}, {}) == ("door", {"state": "closed"})

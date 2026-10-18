@@ -24,5 +24,11 @@
     "counter": "counting_machine"
   },
   "single_instance": ["door"],
-  "notes": "single_instance: classes that appear once per frame; only the most confident box is kept (the fine-tuned detector boxes one door 3-4 times). Zero-shot baseline. Fine-tune and evaluate classes; prompts do not guarantee recognition accuracy."
+  "state_classes": {
+    "door_open": ["door", "open"],
+    "safe_open": ["safe", "open"],
+    "laptop_on": ["laptop", "on"]
+  },
+  "state_defaults": { "door": "closed", "safe": "closed", "laptop": "off" },
+  "notes": "single_instance: classes that appear once per frame; only the most confident box is kept (the fine-tuned detector boxes one door 3-4 times). state_classes: weights trained with a separate class for the open/on state; with such weights the plain class means the opposite state (state_defaults), with other weights it carries no state. Zero-shot baseline. Fine-tune and evaluate classes; prompts do not guarantee recognition accuracy."
 }

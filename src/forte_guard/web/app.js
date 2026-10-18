@@ -588,6 +588,13 @@ $("download-json").onclick = () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 };
+// Which detector weights the service runs, from the public health check.
+fetch("/health")
+  .then((r) => r.json())
+  .then((h) => {
+    if (h.model) $("model-version").textContent = "модель " + h.model.replace(/\.pt$/, "");
+  })
+  .catch(() => {});
 json("/api/v1/access")
   .then(async (access) => {
     if (access.guest) {
