@@ -44,6 +44,11 @@ STATIC_SIZE_RATIO = 0.5
 NESTED_INSIDE = 0.9  # share of the smaller box's area inside the larger one
 NESTED_MIN_SAMPLES = 5  # samples seen together
 NESTED_MIN_SHARE = 0.8  # of those samples
+# The detector reads the safe's keyhole as a key: a "key" in place from the very start of the video that
+# never moves is the lock itself. A key left in the lock is put there during the video.
+FIXTURE_LABELS = {"safe_key"}
+FIXTURE_START_SEC = 1.0
+FIXTURE_MAX_MOVE = 0.02
 
 
 @dataclass
@@ -188,11 +193,39 @@ def _set_aside_duplicate_people(objects: ObjectJournal) -> None:
     )
 
 
+def _set_aside_fixtures(objects: ObjectJournal) -> None:
+    if not objects.frames:
+        return
+    start = objects.frames[0].timestamp_sec
+    seen = defaultdict(list)
+    for timestamp, item in _detections(objects):
+        if item.label in FIXTURE_LABELS:
+            seen[item.track_id].append((timestamp, item))
+    fixtures = set()
+    for track_id, items in seen.items():
+        xs = [item.box.center[0] for _, item in items]
+        ys = [item.box.center[1] for _, item in items]
+        still = max(max(xs) - min(xs), max(ys) - min(ys)) < FIXTURE_MAX_MOVE
+        if still and items[0][0] - start <= FIXTURE_START_SEC:
+            fixtures.add(track_id)
+    if not fixtures:
+        return
+    for _, item in _detections(objects):
+        if item.track_id in fixtures and item.label in FIXTURE_LABELS:
+            item.attributes["raw_label"] = item.label
+            item.label = f"{item.label}_fixture"
+    objects.warnings.append(
+        f"Не учитывается «ключ», который с первой секунды неподвижно виден в замке ({len(fixtures)}): "
+        "вероятно, это сам замок."
+    )
+
+
 def repair_tracks(objects: ObjectJournal) -> ObjectJournal:
-    """One label per track among confusable classes, broken tracks joined, static phantom people and second
-    boxes on the same person set aside."""
+    """One label per track among confusable classes, broken tracks joined, static phantom people, second
+    boxes on the same person and a lock read as a key set aside."""
     _vote_labels(objects)
     _stitch(objects)
     _set_aside_static_people(objects)
     _set_aside_duplicate_people(objects)
+    _set_aside_fixtures(objects)
     return objects

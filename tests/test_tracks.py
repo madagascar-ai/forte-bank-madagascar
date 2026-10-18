@@ -150,3 +150,12 @@ def test_people_overlapping_side_by_side_are_both_kept():
     visitor = ("visitor", "person", [0.2, 0.25, 0.42, 0.6], 0.9)  # half of the cashier's box overlaps
     objects = repair_tracks(_objects([[SEATED_TO_DESK, visitor] for _ in range(10)]))
     assert _track_ids(objects, "person") == {"cashier", "visitor"}
+
+
+def test_key_in_the_lock_from_the_start_that_never_moves_is_the_lock():
+    # The detector reads the keyhole as a key from the first frame; a key put in later is still a key.
+    lock = ("k1", "safe_key", [0.67, 0.5, 0.68, 0.51], 0.4)
+    inserted = ("k2", "safe_key", [0.66, 0.49, 0.68, 0.52], 0.6)
+    objects = repair_tracks(_objects([[lock] for _ in range(20)] + [[lock, inserted] for _ in range(20)]))
+    assert _track_ids(objects, "safe_key") == {"k2"}
+    assert _track_ids(objects, "safe_key_fixture") == {"k1"}
