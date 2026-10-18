@@ -616,3 +616,44 @@ def test_legitimate_client_alone_is_not_flagged_as_unidentified():
     objects, profile = _scene(frames)
     journal = build_journal(objects, profile, 6, 5)
     assert not any(a.type == "unidentified_person_no_transaction" for a in journal.actions)
+
+
+COUNTER_VISIT = [0.44, 0.44, 0.56, 0.56]
+
+
+def test_a_client_voted_person_who_passes_through_the_counter_without_transacting_is_flagged():
+    # Mostly stands in client_area (votes "client" overall), but first steps into the restricted
+    # counter_area without any transaction happening there — the client-role vote earned from
+    # standing elsewhere does not excuse that visit; only an overlapping transaction event does.
+    frames = [[CASHIER, ("visitor", "person", COUNTER_VISIT)] for _ in range(5)]
+    frames += [[CASHIER, ("visitor", "person", [0.65, 0.1, 0.95, 0.8])] for _ in range(15)]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 4, 5)
+    assert journal.roles["visitor"] == "client"
+    events = [a for a in journal.actions if a.type == "unidentified_person_no_transaction"]
+    assert len(events) == 1
+    assert events[0].actor_ids == ["visitor"]
+
+
+def test_a_client_who_transacts_during_the_counter_visit_is_not_flagged():
+    # A separate, genuine client (CLIENT) is present throughout to give document_presented a
+    # session to attach to — the document itself sits where "visitor" is, at the counter.
+    doc = ("doc1", "document", COUNTER_VISIT)
+    frames = [[CASHIER, CLIENT, ("visitor", "person", COUNTER_VISIT), doc] for _ in range(5)]
+    frames += [[CASHIER, CLIENT, ("visitor", "person", [0.65, 0.1, 0.95, 0.8])] for _ in range(15)]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 4, 5)
+    assert journal.roles["visitor"] == "client"
+    assert any(a.type == "document_presented" for a in journal.actions)
+    assert not any(a.type == "unidentified_person_no_transaction" for a in journal.actions)
+
+
+def test_a_client_grazing_the_counter_for_one_sample_is_not_flagged():
+    # The box of a client leaning over the counter can dip into it for a single sample.
+    seated = ("visitor", "person", [0.65, 0.1, 0.95, 0.8])
+    frames = [[CASHIER, seated] for _ in range(10)] + [[CASHIER, ("visitor", "person", COUNTER_VISIT)]]
+    frames += [[CASHIER, seated] for _ in range(10)]
+    objects, profile = _with_counter(frames)
+    journal = build_journal(objects, profile, 5, 5)
+    assert journal.roles["visitor"] == "client"
+    assert not any(a.type == "unidentified_person_no_transaction" for a in journal.actions)

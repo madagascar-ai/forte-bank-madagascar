@@ -475,6 +475,9 @@ def build_journal(
             return
         episode = unidentified_episode
         unidentified_episode = None
+        # A client's box dipping into the counter for a single sample is jitter, not a visit.
+        if episode["clients_only"] and episode["samples"] < required:
+            return
         had_transaction = any(
             action.type in TRANSACTION_EVENT_TYPES
             and action.end_sec >= episode["start"]
@@ -723,15 +726,25 @@ def build_journal(
         others = [p for p in people if roles.get(p.track_id) != "cashier"]
         state("extra_person_present", True if len(others) >= 2 else None, frame)
 
-        unidentified_at_workstation = [
-            p
-            for p in others
-            if roles.get(p.track_id) != "client" and zone_of(p, profile) in WORKSTATION_ZONES
-        ]
+        # A "client"-voted track is not exempt here: the zone vote only says where someone stood
+        # most of the time, not that every entry into the cashier's own restricted area was a
+        # legitimate handover — close_unidentified_episode() still clears them the moment an
+        # actual transaction event overlaps their presence, so a real client reaching across the
+        # counter is unaffected.
+        unidentified_at_workstation = [p for p in others if zone_of(p, profile) in WORKSTATION_ZONES]
         if unidentified_at_workstation:
             if unidentified_episode is None:
-                unidentified_episode = {"start": frame.timestamp_sec, "frame": frame, "actor_ids": set()}
+                unidentified_episode = {
+                    "start": frame.timestamp_sec,
+                    "frame": frame,
+                    "actor_ids": set(),
+                    "samples": 0,
+                    "clients_only": True,
+                }
             unidentified_episode["end"], unidentified_episode["last_frame"] = frame.timestamp_sec, frame
+            unidentified_episode["samples"] += 1
+            if any(roles.get(p.track_id) != "client" for p in unidentified_at_workstation):
+                unidentified_episode["clients_only"] = False
             unidentified_episode["actor_ids"].update(p.track_id for p in unidentified_at_workstation)
         else:
             close_unidentified_episode()
