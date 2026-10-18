@@ -426,3 +426,36 @@ def test_a_passer_by_grazing_the_cashier_area_once_is_not_a_cashier():
     frames = [[CASHIER, grazing]] + [[CASHIER, outside] for _ in range(30)]
     objects, profile = _scene(frames)
     assert build_journal(objects, profile, 6, 5).roles["passerby"] == "unknown"
+
+
+MONEY_IN_COUNTER = [0.35, 0.15, 0.40, 0.20]
+
+
+def _client_departures(journal):
+    return [event for event in journal.actions if event.type == "client_left_counter"]
+
+
+def test_client_leaves_before_recount_finishes_is_flagged(settings):
+    # The client is seen at the counter long enough for her role to lock in, then steps away while
+    # the cash is still sitting in the counting machine (it never leaves, so counting never closes).
+    frames = (
+        [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
+        + [[("client", "person", AWAY), COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(10)]
+    )
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 5, 5, presence="zone")
+    assert len(_client_departures(journal)) == 1
+    assert any(s.name == "counting_in_progress" and s.value is True for s in journal.states)
+    rules, scenarios = load_catalog(settings.config_dir)
+    candidates = rule_candidates(journal, rules, scenarios)
+    assert any(c.rule_id == "client_left_before_count_complete" for c in candidates)
+
+
+def test_client_staying_through_the_recount_is_not_flagged(settings):
+    frames = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(20)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 4, 5, presence="zone")
+    assert _client_departures(journal) == []
+    rules, scenarios = load_catalog(settings.config_dir)
+    candidates = rule_candidates(journal, rules, scenarios)
+    assert not any(c.rule_id == "client_left_before_count_complete" for c in candidates)

@@ -290,11 +290,14 @@ def build_journal(
         "extra_person_present",
         "cash_counted",
         "cash_retrieved_in_pieces",
+        "client_left_counter",
+        "client_returned_to_counter",
     ]
     required = max(1, math.ceil(fps * 0.4))
     smoothers = defaultdict(lambda: StableValue(required))
     areas = {zone.name: zone.box for zone in profile.zones}
     workstation = ZonePresence(required, areas.get("cashier_area"), areas.get("exit_area"))
+    client_station = ZonePresence(required, areas.get("client_area"), areas.get("exit_area"))
     open_states: dict[tuple, State] = {}
     active_session: str | None = None
     sessions: dict[str, str] = {}
@@ -459,7 +462,29 @@ def build_journal(
             elif old is False and stable_present is True:
                 transition_ids = [event("cashier_returned", frame, cashier_ids).event_id]
         state("cashier_present", stable_present, frame, source_events=transition_ids)
-        state("client_present", True if clients else None, frame)
+
+        client_ids = [key for key, role in roles.items() if role == "client"]
+        client_transition_ids = []
+        if presence == "zone":
+            client_present_observed = client_station.observe(
+                frame.timestamp_sec,
+                [p for p in people if roles.get(p.track_id) == "client"],
+                hands,
+                walked_away=any(key in visible for key in client_ids),
+                alive=bool(frame.detections),
+            )
+            old_client, stable_client_present = client_station.update(client_present_observed)
+            if old_client is True and stable_client_present is False:
+                client_transition_ids = [
+                    event(
+                        "client_left_counter", frame, client_station.ids, start=client_station.empty_since
+                    ).event_id
+                ]
+            elif old_client is False and stable_client_present is True:
+                client_transition_ids = [event("client_returned_to_counter", frame, client_station.ids).event_id]
+            state("client_present", stable_client_present, frame, source_events=client_transition_ids)
+        else:
+            state("client_present", True if clients else None, frame)
 
         observed_counter_cash = [m for m in money_items if zone_of(m, profile) == "counter_area"]
         state("cash_on_counter", True if observed_counter_cash else None, frame, source_events=[])
@@ -579,6 +604,11 @@ def build_journal(
                 gap_counting = {"start": last_money_near_machine_time, "samples": 0, "near": 0}
             gap_counting["samples"] += 1
             gap_counting["near"] += int(cashier_reaching_machine)
+
+        # True from the moment cash is first seen in the machine (or vanishes near it) until the
+        # episode closes — a client leaving while this is still open skips the recount they're
+        # entitled to witness (Rules No. 231, p. 20, p. 31.4).
+        state("counting_in_progress", True if (counting is not None or gap_counting is not None) else None, frame)
 
         others = [p for p in people if roles.get(p.track_id) != "cashier"]
         state("extra_person_present", True if len(others) >= 2 else None, frame)
