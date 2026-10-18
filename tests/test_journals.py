@@ -463,6 +463,18 @@ def test_client_staying_through_the_recount_is_not_flagged(settings):
     assert not any(c.rule_id == "client_left_before_count_complete" for c in candidates)
 
 
+def test_client_vanishing_mid_area_confirms_after_the_shorter_client_wait():
+    # A client vanishing mid-area (not visibly walking off) is still a deliberate wait, just
+    # shorter than the cashier's own tuned 6s — missing a witnessed recount matters more.
+    present = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
+    absent = [[COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(30)]
+    short, profile = _scene(present + absent[:10])  # ~2s of absence: short of the 5s wait
+    assert _client_departures(build_journal(short, profile, 4, 5, presence="zone")) == []
+    full, profile = _scene(present + absent)
+    departures = _client_departures(build_journal(full, profile, 8, 5, presence="zone"))
+    assert len(departures) == 1 and departures[0].start_sec == 2.4
+
+
 def test_long_open_door_reports_and_validates_near_the_threshold(settings):
     # min_duration_sec for cash_room_door_open is 4.0: a door seen open for 10s straight should
     # point at ~4s (when it became a violation), not snap back to 0s (when it merely opened) —
