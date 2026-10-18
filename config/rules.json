@@ -115,13 +115,13 @@
       "id": "safe_key_left_in_lock",
       "title": "Ключ оставлен в замке сейфа",
       "kind": "state",
-      "source_status": "verified",
+      "source_status": "needs_review",
       "engine": {
         "type": "overlap",
         "states": {
           "safe_key_in_lock": true
         },
-        "min_duration_sec": 5.0,
+        "min_duration_sec": 10.0,
         "allow_cross_session": true
       },
       "document": {
@@ -130,7 +130,7 @@
         "clause": "пункт 80: порядок хранения ключей от устройств для хранения наличных обеспечивает исключение их несанкционированного использования — трактовка"
       },
       "observation": "С {t} с в замке сейфа находится ключ.",
-      "conditions": "Ключ в замке не менее 5 с."
+      "conditions": "Ключ в замке не менее 10 с: открыть или закрыть сейф занимает несколько секунд, ключ дольше — оставлен."
     },
     {
       "id": "personal_items_at_workstation",
