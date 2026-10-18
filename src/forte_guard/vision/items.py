@@ -2,7 +2,8 @@
 
 A personal_item track whose box centre is mostly green over several frames is relabelled cash_bag.
 Pure colour statistics, no model call. Threshold from the training boxes: per box, a green share of
-at least 0.2 holds for 69% of cash bags and 17% of personal items; the median over a track is steadier.
+at least 0.1 holds for 84% of cash bags and 22% of personal items; the median over a track is steadier, and a
+bag held in hands (arms and clothes in the box) measured 0.13-0.16, so 0.2 missed it.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from ..contracts import Frame, ObjectJournal
 from ..settings import Settings
 
 LABEL = "personal_item"
-GREEN_SHARE = 0.2  # median share of green pixels in the box centre that makes a track a cash bag
+GREEN_SHARE = 0.1  # median share of green pixels in the box centre that makes a track a cash bag
 MIN_SAMPLES = 3  # fewer measured frames decide nothing
 MAX_SAMPLES = 15  # per track, spread over its frames
 CENTRE = 0.6  # measure the middle of the box: less desk and background
