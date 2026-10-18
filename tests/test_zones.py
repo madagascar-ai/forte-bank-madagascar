@@ -99,3 +99,32 @@ def test_fine_tuned_classes_map_to_journal_vocabulary():
     journal_names = {"person", "money", "document", "counting_machine", "safe", "door", "laptop"}
     mapped = {aliases.get(name, name) for name in trained}
     assert journal_names <= mapped
+
+
+def _counter_scene(scale=1.0):
+    # Cashier and client 0.26 apart at the usual size; scale < 1 is the same scene from twice as far.
+    def at(box):
+        return [0.5 + scale * (v - 0.5) for v in box]
+
+    frames = []
+    for index in range(60):
+        items = [
+            detection("cashier", "person", at([0.18, 0.35, 0.38, 0.65])),
+            detection("machine", "counting_machine", at([0.2, 0.68, 0.3, 0.76])),
+        ]
+        if index % 20 < 15:
+            items.append(detection(f"client{index // 20}", "person", at([0.44, 0.35, 0.64, 0.65])))
+        frames.append(items)
+    return journal(frames)
+
+
+def test_a_camera_twice_as_far_still_separates_cashier_and_client():
+    for scale, cashier_home, client_home in ((1.0, (0.28, 0.5), (0.54, 0.5)), (0.5, (0.39, 0.5), (0.52, 0.5))):
+        objects = _counter_scene(scale)
+        profile, _ = estimate_zones(objects)
+        cashier, client = zone(profile, "cashier_area"), zone(profile, "client_area")
+        assert cashier is not None and client is not None, scale
+        assert cashier.contains(cashier_home) and not cashier.contains(client_home)
+        assert client.contains(client_home) and not client.contains(cashier_home)
+        roles = assign_roles(objects, profile)
+        assert roles["cashier"] == "cashier" and roles["client0"] == "client"

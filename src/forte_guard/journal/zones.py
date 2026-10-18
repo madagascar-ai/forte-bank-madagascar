@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 from collections import Counter, defaultdict
 from itertools import pairwise
 
@@ -19,6 +20,11 @@ EXITS = {"door"}
 RESTING_ITEMS = {"money", "document"}
 # Without these the journal cannot assign roles or locate cash, so a fallback is worth trying.
 CORE_ZONES = {"cashier_area", "counter_area"}
+# The distances below were tuned on scenes where the longest-staying person (normally the cashier) is
+# 0.17-0.28 of the frame (sqrt of the box area, training videos). A camera much farther away or closer
+# leaves that range; there the distances scale with the person, so a client standing close to the
+# counter is still told apart from the cashier.
+FAMILIAR_PERSON_SIZES = (0.165, 0.28)
 
 
 def _center(item: Detection) -> tuple[float, float]:
@@ -50,12 +56,30 @@ def _box(x1: float, y1: float, x2: float, y2: float, min_size: float = 0.04) -> 
     return Box(x1=x1, y1=y1, x2=x2, y2=y2)
 
 
-def _home(points: list[tuple[float, float]]) -> tuple[float, float]:
-    # The most occupied 0.1 cell, not the mean: a cashier who walks away keeps their workstation.
-    cells = Counter((min(int(x * 10), 9), min(int(y * 10), 9)) for x, y in points)
+def _scene_scale(tracks: dict) -> float:
+    people = [seen for (group, _), seen in tracks.items() if group == "person"]
+    if not people:
+        return 1.0
+    size = statistics.median(
+        math.sqrt((item.box.x2 - item.box.x1) * (item.box.y2 - item.box.y1)) for _, item in max(people, key=len)
+    )
+    low, high = FAMILIAR_PERSON_SIZES
+    if size < low:
+        return max(0.5, size / low)
+    if size > high:
+        return min(2.0, size / high)
+    return 1.0
+
+
+def _home(points: list[tuple[float, float]], scale: float = 1.0) -> tuple[float, float]:
+    # The most occupied cell (a tenth of the frame at the reference scale), not the mean: a cashier who
+    # walks away keeps their workstation.
+    cells_per_side = 10 / scale
+    last = math.ceil(cells_per_side) - 1
+    cells = Counter((min(int(x * cells_per_side), last), min(int(y * cells_per_side), last)) for x, y in points)
     (gx, gy), _ = cells.most_common(1)[0]
-    anchor = ((gx + 0.5) / 10, (gy + 0.5) / 10)
-    near = [p for p in points if math.dist(p, anchor) < 0.15]
+    anchor = ((gx + 0.5) / cells_per_side, (gy + 0.5) / cells_per_side)
+    near = [p for p in points if math.dist(p, anchor) < 0.15 * scale]
     return _quantile([p[0] for p in near], 0.5), _quantile([p[1] for p in near], 0.5)
 
 
@@ -98,9 +122,11 @@ def estimate_zones(objects: ObjectJournal) -> tuple[ZoneProfile, list[str]]:
     notes: list[str] = []
     zones: dict[str, Box] = {}
 
+    scale = _scene_scale(tracks)
+
     def fixture(labels: set[str]) -> Box | None:
         boxes = [item.box for (group, _), seen in tracks.items() if group in labels for _, item in seen]
-        return _spread(boxes, 0.02, 0.1, 0.9) if len(boxes) >= 3 else None
+        return _spread(boxes, 0.02 * scale, 0.1, 0.9) if len(boxes) >= 3 else None
 
     for name, labels in (("storage_area", STORAGE), ("exit_area", EXITS)):
         if box := fixture(labels):
@@ -110,22 +136,22 @@ def estimate_zones(objects: ObjectJournal) -> tuple[ZoneProfile, list[str]]:
     people = {key[1]: seen for key, seen in tracks.items() if key[0] == "person" and len(seen) >= minimum}
     stations: list[dict] = []
     for track_id, seen in sorted(people.items(), key=lambda pair: -len(pair[1])):
-        home = _home([_center(item) for _, item in seen])
-        station = next((s for s in stations if math.dist(s["home"], home) < 0.15), None)
+        home = _home([_center(item) for _, item in seen], scale)
+        station = next((s for s in stations if math.dist(s["home"], home) < 0.15 * scale), None)
         if station is None:
             station = {"home": home, "boxes": [], "frames": set(), "tracks": set(), "labels": Counter()}
             stations.append(station)
         station["tracks"].add(track_id)
         station["labels"].update(item.label for _, item in seen if item.label != "person")
         for index, item in seen:
-            if math.dist(_center(item), home) < 0.15:
+            if math.dist(_center(item), home) < 0.15 * scale:
                 station["boxes"].append(item.box)
                 station["frames"].add(index)
     work = [_center(item) for (group, _), seen in tracks.items() if group in WORK_OBJECTS for _, item in seen]
 
     def score(station: dict) -> float:
         coverage = len(station["frames"]) / total
-        near = sum(math.dist(p, station["home"]) < 0.35 for p in work) / len(work) if work else 0.0
+        near = sum(math.dist(p, station["home"]) < 0.35 * scale for p in work) / len(work) if work else 0.0
         labels = station["labels"]
         named = (labels["cashier"] - labels["client"]) / max(1, labels["cashier"] + labels["client"])
         return coverage + near + named
@@ -139,14 +165,16 @@ def estimate_zones(objects: ObjectJournal) -> tuple[ZoneProfile, list[str]]:
         cashier = None
     client_home = None
     if cashier is not None:
-        cashier_box = _spread(cashier["boxes"], 0.02, 0.1, 0.9)
+        cashier_box = _spread(cashier["boxes"], 0.02 * scale, 0.1, 0.9)
         others = [
             item
             for (group, track_id), seen in tracks.items()
             if group == "person" and track_id not in cashier["tracks"]
             for _, item in seen
         ]
-        client_box = _spread([item.box for item in others], 0.02, 0.05, 0.95) if len(others) >= minimum else None
+        client_box = (
+            _spread([item.box for item in others], 0.02 * scale, 0.05, 0.95) if len(others) >= minimum else None
+        )
         if cashier_box and client_box:
             centers = [_center(item) for item in others]
             client_home = (_quantile([p[0] for p in centers], 0.5), _quantile([p[1] for p in centers], 0.5))
@@ -164,25 +192,26 @@ def estimate_zones(objects: ObjectJournal) -> tuple[ZoneProfile, list[str]]:
             resting.extend(_center(item) for _, item in seen)
         elif group in RESTING_ITEMS:
             for (i, a), (j, b) in pairwise(seen):
-                if j - i <= 2 and math.dist(_center(a), _center(b)) < 0.015:
+                if j - i <= 2 and math.dist(_center(a), _center(b)) < 0.015 * scale:
                     resting.append(_center(b))
     if storage := zones.get("storage_area"):
         resting = [p for p in resting if not storage.contains(p)]
     if len(resting) >= 3:
         xs, ys = [p[0] for p in resting], [p[1] for p in resting]
+        pad = 0.05 * scale
         counter = _box(
-            _quantile(xs, 0.1) - 0.05,
-            _quantile(ys, 0.1) - 0.05,
-            _quantile(xs, 0.9) + 0.05,
-            _quantile(ys, 0.9) + 0.05,
-            min_size=0.1,
+            _quantile(xs, 0.1) - pad,
+            _quantile(ys, 0.1) - pad,
+            _quantile(xs, 0.9) + pad,
+            _quantile(ys, 0.9) + pad,
+            min_size=0.1 * scale,
         )
         if counter:
             zones["counter_area"] = counter
     elif cashier is not None and client_home is not None:
         (hx, hy), (kx, ky) = cashier["home"], client_home
         mx, my = (hx + kx) / 2, (hy + ky) / 2
-        half_x, half_y = 0.15 * abs(kx - hx) + 0.06, 0.15 * abs(ky - hy) + 0.06
+        half_x, half_y = 0.15 * abs(kx - hx) + 0.06 * scale, 0.15 * abs(ky - hy) + 0.06 * scale
         if counter := _box(mx - half_x, my - half_y, mx + half_x, my + half_y):
             zones["counter_area"] = counter
             notes.append("Автозоны: стол оценён между кассиром и клиентом, лежащие деньги не наблюдались.")
