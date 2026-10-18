@@ -64,6 +64,12 @@ def _build_summary(journal: ActionJournal) -> dict:
     }
 
 
+def _clock(seconds: float) -> str:
+    # Same mm:ss.s as the player and the timecode button, so a reviewer can find the moment.
+    minutes, rest = divmod(max(seconds, 0.0), 60)
+    return f"{int(minutes):02d}:{rest:04.1f}"
+
+
 def _evidence(candidate, frame_map: dict[str, Frame]) -> list[Evidence]:
     frames = sorted(
         (frame_map[key] for key in set(candidate.evidence_frame_ids)), key=lambda f: f.timestamp_sec
@@ -191,7 +197,7 @@ def run_pipeline(
             warnings.extend(llm_warnings)
         except Exception as exc:
             from_llm = []
-            warnings.append(f"Ветка LLM недоступна ({type(exc).__name__}); показаны кандидаты правил в коде.")
+            warnings.append(f"Языковая модель недоступна ({type(exc).__name__}); результат построен только по правилам.")
     write_json(output / "candidates.rules.json", [c.model_dump() for c in from_rules])
     write_json(output / "candidates.llm.json", [c.model_dump() for c in from_llm])
     timings["candidates"] = time.monotonic() - started
@@ -200,7 +206,7 @@ def run_pipeline(
     combined = merge_candidates([*from_rules, *from_llm])
     accepted, validation_warnings = validate_candidates(combined, journal, frames, rules)
     warnings.extend(validation_warnings)
-    warnings.append("Верификация MVP проверяет ссылки и таймкоды; повторная визуальная проверка отключена.")
+    warnings.append("Нарушения найдены по журналу событий видео; кадры повторно не перепроверялись — сверьте их с кадрами-доказательствами.")
     write_json(output / "candidates.json", [c.model_dump() for c in combined])
     frame_map = {frame.frame_id: frame for frame in frames}
     rule_map = {rule.id: rule for rule in rules}
@@ -209,16 +215,14 @@ def run_pipeline(
         rule = rule_map[candidate.rule_id]
         document = rule.document
         observed = (
-            rule.observation.replace("{t}", f"{candidate.timecode_sec:.1f}")
+            rule.observation.replace("{t}", _clock(candidate.timecode_sec))
             if rule.observation
             else candidate.reasoning
         )
-        description = (
-            observed + f" Основание для проверки: {document.get('title', '')}; "
-            f"{document.get('clause', '')}."
-        )
+        clause = document.get("clause", "").replace(" — трактовка", " (трактовка нормы)")
+        description = f"{observed} Норма: {document.get('title', '')}, {clause}."
         if rule.source_status != "verified":
-            description += " Нормативная привязка предварительная."
+            description += " Ссылка на норму предварительная: применимость нужно подтвердить."
         violations.append(
             Violation(
                 type=rule.title,

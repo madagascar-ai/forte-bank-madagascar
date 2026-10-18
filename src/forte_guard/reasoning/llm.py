@@ -102,7 +102,7 @@ def llm_candidates(
 ) -> tuple[list[Candidate], list[str]]:
     enabled = [rule for rule in rules if eligible(rule, journal)]
     if not settings.llm_enabled:
-        return [], ["Ветка LLM отключена настройкой."]
+        return [], ["Языковая модель отключена настройкой; результат построен только по правилам."]
     if not enabled:
         return [], ["Для текущих возможностей распознавания нет активных правил LLM."]
     event_map = {event.event_id: event for event in journal.actions}
@@ -264,5 +264,5 @@ def llm_candidates(
                 )
             )
         except (KeyError, ValueError, TypeError):
-            warnings.append("LLM-кандидат с некорректными ссылками или контекстом отброшен.")
+            warnings.append("Предложение языковой модели отброшено: некорректные ссылки или контекст.")
     return candidates, warnings

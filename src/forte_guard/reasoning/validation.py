@@ -69,7 +69,7 @@ def validate_candidates(
         )
         if not valid:
             item.status, item.verification = "rejected", "invalid_references_or_interval"
-            warnings.append("Кандидат с некорректными ссылками или интервалом отброшен.")
+            warnings.append("Одно из возможных нарушений отброшено: некорректные ссылки или интервал.")
             continue
         rule = rule_map[item.rule_id]
         refs = [*[event_map[key] for key in item.event_ids], *[state_map[key] for key in item.state_ids]]
@@ -118,7 +118,7 @@ def validate_candidates(
             supported = all(journal.coverage.get(flag) for flag in engine.get("required_context_flags", []))
         if not supported:
             item.status, item.verification = "rejected", "observations_do_not_support_rule"
-            warnings.append("Кандидат отброшен: связанные наблюдения не подтверждают условия правила.")
+            warnings.append("Одно из возможных нарушений отброшено: наблюдения не подтверждают условия.")
             continue
         # Pick a real decoded frame, not a numeric timestamp invented by a model.
         witness = min(
@@ -132,5 +132,5 @@ def validate_candidates(
         item.status, item.verification = "accepted", "structural_only"
         accepted.append(item)
         if rule.source_status != "verified":
-            warnings.append(f"Нормативная привязка {rule.id} требует проверки редакции и применимости.")
+            warnings.append(f"Ссылка на норму для «{rule.title}» предварительная: проверьте редакцию и применимость.")
     return accepted, list(dict.fromkeys(warnings))
