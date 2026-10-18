@@ -67,6 +67,13 @@ ABSENT_MIDZONE_SEC = 6.0
 # threshold above — missing a witnessed recount matters more than a few extra false positives, but
 # this is still a deliberate wait, not instant, to stay clear of a brief occlusion.
 CLIENT_ABSENT_MIDZONE_SEC = 5.0
+# A clip that simply ends while the client is untracked and counting is still open never lets the
+# wait above run its course — there is no more footage to confirm or refute it. Treat that as a
+# departure only when both hold: she is gone for a real stretch (not one dropped sample) AND that
+# stretch starts close enough to the very last frame that it looks like the clip was cut off
+# mid-departure, not a long, unexplained absence earlier in an otherwise complete recording.
+TAIL_UNTRACKED_MIN_SEC = 0.5
+TAIL_WINDOW_SEC = 2.0
 ZONE_EDGE_MARGIN = 0.05
 TRANSITIONS = {"open": "opened", "closed": "closed", "on": "turned_on", "off": "turned_off"}
 # A long-running state (e.g. a door staying open) kept only its first and latest frame as evidence,
@@ -74,6 +81,10 @@ TRANSITIONS = {"open": "opened", "closed": "closed", "on": "turned_on", "off": "
 # the witness snapped back to the very first frame, making "left open" look identical to "just
 # opened". Freeze a frame roughly this often so there's always one near any reasonable threshold.
 STATE_EVIDENCE_INTERVAL_SEC = 1.0
+# A person at the cashier's workstation who is neither the cashier nor a client is, by bank policy,
+# unauthorised there regardless of who they are (a safe is present; Rules No. 14, p. 8/16.1) — no
+# grace period, judged from the moment they arrive, not after some minimum stay.
+TRANSACTION_EVENT_TYPES = {"document_presented", "cash_transferred", "cash_counted", "device_used_observed"}
 
 
 def _overlaps(inner: Detection, outer: Detection, margin: float = 0.03) -> bool:
@@ -111,6 +122,7 @@ def person_in_zone(item: Detection, profile: ZoneProfile, name: str) -> bool:
 def assign_roles(objects: ObjectJournal, profile: ZoneProfile) -> dict[str, str]:
     votes = defaultdict(list)
     samples = Counter()
+    cashier_span: dict[str, list[float]] = {}  # track_id -> [first, last] timestamp seen in cashier_area
     for frame in objects.frames:
         for item in frame.detections:
             if item.label not in {"person", "cashier", "client"}:
@@ -123,9 +135,12 @@ def assign_roles(objects: ObjectJournal, profile: ZoneProfile) -> dict[str, str]
                 # otherwise collect "unknown" votes on the way and never become a client.
                 if person_in_zone(item, profile, "cashier_area"):
                     votes[item.track_id].append("cashier")
+                    bounds = cashier_span.setdefault(item.track_id, [frame.timestamp_sec, frame.timestamp_sec])
+                    bounds[1] = frame.timestamp_sec
                 elif person_in_zone(item, profile, "client_area"):
                     votes[item.track_id].append("client")
     roles = {}
+    cashier_votes: dict[str, int] = {}
     for track_id, values in votes.items():
         # A passer-by whose box grazes an area once is not placed there.
         if len(values) < MIN_ROLE_VOTES and len(values) < MIN_ROLE_SHARE * samples[track_id]:
@@ -133,6 +148,22 @@ def assign_roles(objects: ObjectJournal, profile: ZoneProfile) -> dict[str, str]
             continue
         role, count = Counter(values).most_common(1)[0]
         roles[track_id] = role if count / len(values) >= 0.7 else "unknown"
+        if roles[track_id] == "cashier":
+            cashier_votes[track_id] = count
+    if len(cashier_votes) > 1:
+        # Only one person works the counter at a time — but a tracker that loses and
+        # re-identifies the same cashier produces several track ids that are never actually seen
+        # in the zone AT THE SAME TIME as one another; those all stay "cashier". Demote a track
+        # only when its time in the zone genuinely overlaps the strongest-evidence one — that is
+        # the signature of a second, simultaneous person (e.g. a visitor leaning over the desk).
+        keep = max(cashier_votes, key=cashier_votes.get)
+        kept_start, kept_end = cashier_span[keep]
+        for track_id in cashier_votes:
+            if track_id == keep:
+                continue
+            other_start, other_end = cashier_span[track_id]
+            if other_start <= kept_end and kept_start <= other_end:
+                roles[track_id] = "unknown"
     return roles
 
 
@@ -310,6 +341,7 @@ def build_journal(
         "cash_retrieved_in_pieces",
         "client_left_counter",
         "client_returned_to_counter",
+        "unidentified_person_no_transaction",
     ]
     required = max(1, math.ceil(fps * 0.4))
     smoothers = defaultdict(lambda: StableValue(required))
@@ -334,6 +366,7 @@ def build_journal(
     emitted_device_contacts = set()
     last_observed = {}
     client_zone_seen: dict[str, float] = {}
+    last_client_seen_frame = None  # the actual frame she was last detected in, anywhere
     gap_counting: dict | None = None  # current money-absence stretch near the machine
     last_money_near_machine_time: float | None = None
     fragment_window: dict | None = None  # tracks quick successive track ids right after counting
@@ -341,6 +374,7 @@ def build_journal(
     session_started: dict[str, float] = {}
     session_order: list[str] = []
     counting: dict | None = None  # current stay of cash inside the machine
+    unidentified_episode: dict | None = None  # current stretch of a non-cashier, non-client person present
     frame_times = [frame.timestamp_sec for frame in objects.frames]
     journal.coverage = {
         "first_frame_sec": frame_times[0] if frame_times else None,
@@ -422,6 +456,31 @@ def build_journal(
         open_states[key] = item
         evidence_marked_at[key] = frame.timestamp_sec
 
+    def close_unidentified_episode():
+        nonlocal unidentified_episode
+        if unidentified_episode is None:
+            return
+        episode = unidentified_episode
+        unidentified_episode = None
+        had_transaction = any(
+            action.type in TRANSACTION_EVENT_TYPES
+            and action.end_sec >= episode["start"]
+            and action.start_sec <= episode["end"]
+            for action in journal.actions
+        )
+        if not had_transaction:
+            violation = event(
+                "unidentified_person_no_transaction",
+                episode["last_frame"],
+                sorted(episode["actor_ids"]),
+                [],
+                confidence=0.6,
+                start=episode["start"],
+            )
+            violation.evidence_frame_ids = list(
+                dict.fromkeys([episode["frame"].frame_id, episode["last_frame"].frame_id])
+            )
+
     for frame in objects.frames:
         people = [d for d in frame.detections if d.label in {"person", "cashier", "client"}]
         hands = [d for d in frame.detections if d.label == "hand"]
@@ -493,11 +552,14 @@ def build_journal(
         state("cashier_present", stable_present, frame, source_events=transition_ids)
 
         client_ids = [key for key, role in roles.items() if role == "client"]
+        client_people_here = [p for p in people if roles.get(p.track_id) == "client"]
+        if client_people_here:
+            last_client_seen_frame = frame
         client_transition_ids = []
         if presence == "zone":
             client_present_observed = client_station.observe(
                 frame.timestamp_sec,
-                [p for p in people if roles.get(p.track_id) == "client"],
+                client_people_here,
                 hands,
                 walked_away=any(key in visible for key in client_ids),
                 alive=bool(frame.detections),
@@ -633,6 +695,12 @@ def build_journal(
                 gap_counting = {"start": last_money_near_machine_time, "samples": 0, "near": 0}
             gap_counting["samples"] += 1
             gap_counting["near"] += int(cashier_reaching_machine)
+            if frame.timestamp_sec - gap_counting["start"] > GAP_COUNT_MAX_SEC:
+                # Nothing came back near the machine within the window that would still read as a
+                # plausible count — give up instead of leaving counting_in_progress stuck True for
+                # the rest of the video on money that simply left the frame (put away, out of shot).
+                gap_counting = None
+                last_money_near_machine_time = None
 
         # True from the moment cash is first seen in the machine (or vanishes near it) until the
         # episode closes — a client leaving while this is still open skips the recount they're
@@ -641,6 +709,19 @@ def build_journal(
 
         others = [p for p in people if roles.get(p.track_id) != "cashier"]
         state("extra_person_present", True if len(others) >= 2 else None, frame)
+
+        unidentified_at_workstation = [
+            p
+            for p in others
+            if roles.get(p.track_id) != "client" and zone_of(p, profile) in WORKSTATION_ZONES
+        ]
+        if unidentified_at_workstation:
+            if unidentified_episode is None:
+                unidentified_episode = {"start": frame.timestamp_sec, "frame": frame, "actor_ids": set()}
+            unidentified_episode["end"], unidentified_episode["last_frame"] = frame.timestamp_sec, frame
+            unidentified_episode["actor_ids"].update(p.track_id for p in unidentified_at_workstation)
+        else:
+            close_unidentified_episode()
 
         for item in frame.detections:
             previous_time = last_observed.get(item.track_id)
@@ -851,6 +932,47 @@ def build_journal(
             session=_nearest_session(item.box.center, clients, sessions, active_session),
         )
         action.evidence_frame_ids = list(dict.fromkeys([former[2], frame.frame_id]))
+
+    if objects.frames and last_client_seen_frame is not None:
+        last_frame = objects.frames[-1]
+        tail_gap = last_frame.timestamp_sec - last_client_seen_frame.timestamp_sec
+        cut_off_near_the_end = last_client_seen_frame.timestamp_sec >= last_frame.timestamp_sec - TAIL_WINDOW_SEC
+        still_counting = counting is not None or gap_counting is not None
+        if tail_gap >= TAIL_UNTRACKED_MIN_SEC and cut_off_near_the_end and still_counting:
+            # Anchored at her last sighting (not the final frame) so the overlap engine's anchor
+            # match lines up with where the client_present/counting_in_progress overlap begins,
+            # then stretched to the last frame so the overlap has width. Built directly rather
+            # than through state() / open_states, which assume frames keep arriving in order —
+            # this runs once, after the loop, with a frame earlier than the one it last saw.
+            transition = event(
+                "client_left_counter",
+                last_client_seen_frame,
+                [],
+                attributes={"inferred_from": "untracked_at_clip_end"},
+                confidence=0.5,
+                visibility="uncertain",
+            )
+            journal.states.append(
+                State(
+                    state_id=f"state_{len(journal.states) + 1:06d}",
+                    name="client_present",
+                    value=False,
+                    start_sec=last_client_seen_frame.timestamp_sec,
+                    end_sec=last_frame.timestamp_sec,
+                    entity_ids=[],
+                    session_id=active_session,
+                    evidence_frame_ids=list(
+                        dict.fromkeys([last_client_seen_frame.frame_id, last_frame.frame_id])
+                    ),
+                    source_event_ids=[transition.event_id],
+                    visibility="clear",
+                )
+            )
+
+    # After the end-of-clip transaction inference above, not before it — an episode that looks
+    # transaction-free mid-loop can still be cleared by a handover only recognized once the track
+    # ends with the clip.
+    close_unidentified_episode()
 
     journal.batches = list(batches.values())
     journal.actions.sort(key=lambda a: (a.start_sec, a.end_sec, a.event_id))

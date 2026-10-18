@@ -2,7 +2,7 @@ import json
 
 from examples.make_demo import create_demo
 from forte_guard.contracts import ObjectJournal
-from forte_guard.journal.builder import StableValue, build_journal
+from forte_guard.journal.builder import StableValue, assign_roles, build_journal
 from forte_guard.journal.tracks import repair_tracks
 from forte_guard.reasoning.catalog import load_catalog
 from forte_guard.reasoning.rules import rule_candidates
@@ -465,14 +465,63 @@ def test_client_staying_through_the_recount_is_not_flagged(settings):
 
 def test_client_vanishing_mid_area_confirms_after_the_shorter_client_wait():
     # A client vanishing mid-area (not visibly walking off) is still a deliberate wait, just
-    # shorter than the cashier's own tuned 6s — missing a witnessed recount matters more.
+    # shorter than the cashier's own tuned 6s — missing a witnessed recount matters more. A brief
+    # dip that is NOT the end of the clip (she is seen again well before it ends) is neither a
+    # confirmed wait-based departure nor a clip-cut-off case — ordinary flicker tolerance.
     present = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
     absent = [[COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(30)]
-    short, profile = _scene(present + absent[:10])  # ~2s of absence: short of the 5s wait
-    assert _client_departures(build_journal(short, profile, 4, 5, presence="zone")) == []
+    brief_dip, profile = _scene(present + absent[:10] + present[:20])
+    assert _client_departures(build_journal(brief_dip, profile, 8, 5, presence="zone")) == []
     full, profile = _scene(present + absent)
     departures = _client_departures(build_journal(full, profile, 8, 5, presence="zone"))
     assert len(departures) == 1 and departures[0].start_sec == 2.4
+
+
+def test_client_untracked_right_as_the_clip_cuts_off_is_flagged(settings):
+    # No wait can run its course when the clip itself simply ends — there is no more footage left
+    # to prove she came back. Only counts when the gap is a real stretch (not one dropped sample)
+    # AND starts close to the very last frame (looks cut off, not a long unexplained absence).
+    present = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
+    cut_off, profile = _scene(present + [[COUNTER, ("m1", "money", MONEY_IN_COUNTER)]] * 4)
+    journal = build_journal(cut_off, profile, 4, 5, presence="zone")
+    departures = _client_departures(journal)
+    assert len(departures) == 1
+    assert departures[0].attributes["inferred_from"] == "untracked_at_clip_end"
+    # The synthetic state built for this case must still overlap counting_in_progress for the
+    # existing rule to actually fire on it, not just leave a dangling, unused event behind.
+    rules, scenarios = load_catalog(settings.config_dir)
+    candidates = rule_candidates(journal, rules, scenarios)
+    assert any(c.rule_id == "client_left_before_count_complete" for c in candidates)
+
+
+def test_a_single_dropped_sample_right_at_the_clip_end_is_not_flagged():
+    present = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
+    almost_full, profile = _scene([*present, [COUNTER, ("m1", "money", MONEY_IN_COUNTER)]])
+    assert _client_departures(build_journal(almost_full, profile, 3, 5, presence="zone")) == []
+
+
+def test_a_mid_length_absence_well_short_of_either_threshold_is_not_flagged():
+    # 3.8s of absence: short of the cashier-style 5s wait, and her last sighting sits more than 2s
+    # before the clip ends, so it does not look like the clip was cut off mid-departure either.
+    present = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
+    absent = [[COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(19)]
+    objects, profile = _scene(present + absent)
+    assert _client_departures(build_journal(objects, profile, 8, 5, presence="zone")) == []
+
+
+def test_counting_in_progress_gives_up_after_the_gap_cap_so_a_later_departure_is_not_flagged(settings):
+    # Money seen once near the counter, then never again — put away normally, out of camera view.
+    # counting_in_progress must not stay stuck True for the rest of the video just because nothing
+    # ever came back to close it; a client who leaves much later must not be flagged on its account.
+    seen_once = [[CLIENT, COUNTER, ("m1", "money", MONEY_IN_COUNTER)] for _ in range(12)]
+    money_gone = [[CLIENT, COUNTER] for _ in range(110)]  # 22s with no money anywhere
+    client_leaves_at_the_end = [[COUNTER] for _ in range(5)]  # 1s, client untracked at clip end
+    objects, profile = _scene(seen_once + money_gone + client_leaves_at_the_end)
+    journal = build_journal(objects, profile, 30, 5, presence="zone")
+    assert not any(s.name == "counting_in_progress" and s.value is True and s.end_sec > 23 for s in journal.states)
+    rules, scenarios = load_catalog(settings.config_dir)
+    candidates = rule_candidates(journal, rules, scenarios)
+    assert not any(c.rule_id == "client_left_before_count_complete" for c in candidates)
 
 
 def test_long_open_door_reports_and_validates_near_the_threshold(settings):
@@ -512,3 +561,41 @@ def test_long_open_door_reports_and_validates_near_the_threshold(settings):
     assert len(accepted) == 1
     # Near the threshold (allow one evidence-sampling interval of slack), nowhere near the opening.
     assert 3.0 <= accepted[0].timecode_sec <= 5.5
+
+
+CASHIER = ("cashier", "person", SEATED)
+BYSTANDER = [0.06, 0.15, 0.36, 0.85]  # also inside cashier_area, overlapping the cashier in time
+
+
+def test_assign_roles_keeps_only_the_cashier_with_more_evidence_when_overlapping():
+    frames = [[CASHIER, ("stranger", "person", BYSTANDER)] for _ in range(30)]
+    objects, profile = _scene(frames)
+    roles = assign_roles(objects, profile)
+    assert roles["cashier"] == "cashier"
+    assert roles["stranger"] == "unknown"
+
+
+def test_unidentified_person_without_transaction_is_flagged_from_the_start():
+    frames = [[CASHIER, ("stranger", "person", BYSTANDER)] for _ in range(30)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 6, 5)
+    events = [a for a in journal.actions if a.type == "unidentified_person_no_transaction"]
+    assert len(events) == 1
+    assert events[0].start_sec == 0.0
+    assert events[0].actor_ids == ["stranger"]
+
+
+def test_unidentified_person_is_not_flagged_once_a_transaction_occurs():
+    doc = ("doc1", "document", [0.66, 0.3, 0.70, 0.34])
+    frames = [[CASHIER, ("stranger", "person", BYSTANDER), CLIENT, doc] for _ in range(30)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 6, 5)
+    assert any(a.type == "document_presented" for a in journal.actions)
+    assert not [a for a in journal.actions if a.type == "unidentified_person_no_transaction"]
+
+
+def test_legitimate_client_alone_is_not_flagged_as_unidentified():
+    frames = [[CASHIER, CLIENT] for _ in range(30)]
+    objects, profile = _scene(frames)
+    journal = build_journal(objects, profile, 6, 5)
+    assert not any(a.type == "unidentified_person_no_transaction" for a in journal.actions)
