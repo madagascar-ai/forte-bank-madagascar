@@ -105,7 +105,7 @@ def test_next_client_elsewhere_at_the_counter_is_a_new_session():
     assert len(_events(build_journal(repair_tracks(_objects(frames)), PROFILE, 5, 5), "client_observed")) == 2
 
 
-PHANTOM = ("ghost", "person", [0.9, 0.3, 0.98, 0.38], 0.4)
+PHANTOM = ("ghost", "person", [0.92, 0.3, 1.0, 0.38], 0.4)  # at the frame edge, like the door glass
 
 
 def _client_walking_in(i):
@@ -130,3 +130,12 @@ def test_people_that_move_or_are_full_size_are_kept():
     frames = [[CASHIER, still_client, passing_small[i], *([brief_small] if i < 5 else [])] for i in range(20)]
     objects = repair_tracks(_objects(frames))
     assert _track_ids(objects, "static_person") == set()
+
+
+def test_a_small_still_client_in_the_middle_of_the_frame_is_kept():
+    # Another camera: the client is far away (a fraction of the cashier's size) and stands still.
+    far_client = ("k1", "person", [0.66, 0.3, 0.74, 0.38], 0.9)
+    frames = [[CASHIER, far_client] for _ in range(40)]
+    objects = repair_tracks(_objects(frames))
+    assert _track_ids(objects, "static_person") == set()
+    assert len(_events(build_journal(objects, PROFILE, 8, 5), "client_observed")) == 1

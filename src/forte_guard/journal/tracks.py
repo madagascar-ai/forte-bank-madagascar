@@ -37,6 +37,10 @@ PEOPLE = {"person", "cashier", "client"}
 STATIC_MAX_MOVE = 0.05
 STATIC_MIN_SEC = 2.0
 STATIC_SIZE_RATIO = 0.5
+# ...and it keeps to the frame edge, where the door glass of this layout is (every such track on the
+# training videos does). A small still person in the middle of the frame, such as a client far from
+# another camera, is kept: losing a real client would hide a violation.
+FRAME_EDGE = 0.02
 
 
 @dataclass
@@ -130,7 +134,9 @@ def _set_aside_static_people(objects: ObjectJournal) -> None:
         xs = [item.box.center[0] for _, item in seen]
         ys = [item.box.center[1] for _, item in seen]
         still = max(max(xs) - min(xs), max(ys) - min(ys)) < STATIC_MAX_MOVE
-        if still and seen[-1][0] - seen[0][0] >= STATIC_MIN_SEC and _size(seen) < STATIC_SIZE_RATIO * reference:
+        edge = sum(min(i.box.x1, i.box.y1, 1 - i.box.x2, 1 - i.box.y2) <= FRAME_EDGE for _, i in seen)
+        lasting = seen[-1][0] - seen[0][0] >= STATIC_MIN_SEC
+        if still and lasting and 2 * edge >= len(seen) and _size(seen) < STATIC_SIZE_RATIO * reference:
             static += 1
             for _, item in seen:
                 item.attributes["raw_label"] = item.label
